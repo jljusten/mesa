@@ -1733,7 +1733,7 @@ _mesa_init_shader_dispatch(const struct gl_context *ctx,
    SET_GetAttribLocationARB(exec, _mesa_GetAttribLocationARB);
 
    if (ctx->API != API_OPENGLES2) {
-      SET_ProgramParameteriARB(exec, _mesa_ProgramParameteriARB);
+      SET_ProgramParameteri(exec, _mesa_ProgramParameteriARB);
    }
 
    if (ctx->API != API_OPENGLES2 && ctx->API != API_OPENGL_CORE) {
