@@ -744,10 +744,6 @@ _mesa_create_exec_table(struct gl_context *ctx)
    }
 
    if (ctx->API != API_OPENGLES2) {
-      SET_FramebufferTextureFaceARB(exec, _mesa_FramebufferTextureFaceARB);
-   }
-
-   if (ctx->API != API_OPENGLES2) {
       SET_ClampColorARB(exec, _mesa_ClampColorARB);
    }
 
