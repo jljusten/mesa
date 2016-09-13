@@ -2713,13 +2713,17 @@ size_t lodepng_get_raw_size(unsigned w, unsigned h, const LodePNGColorMode* colo
   return ((n / 8) * bpp) + ((n & 7) * bpp + 7) / 8;
 }
 
-size_t lodepng_get_raw_size_lct(unsigned w, unsigned h, LodePNGColorType colortype, unsigned bitdepth)
+#if defined(LODEPNG_COMPILE_CPP) && defined(LODEPNG_COMPILE_ENCODER)
+static size_t lodepng_get_raw_size_lct(unsigned w, unsigned h,
+                                       LodePNGColorType colortype,
+                                       unsigned bitdepth)
 {
   /*will not overflow for any color type if roughly w * h < 268435455*/
   size_t bpp = lodepng_get_bpp_lct(colortype, bitdepth);
   size_t n = w * h;
   return ((n / 8) * bpp) + ((n & 7) * bpp + 7) / 8;
 }
+#endif
 
 
 #ifdef LODEPNG_COMPILE_PNG
