@@ -51,6 +51,8 @@ MESA_UTIL_FILES := \
 	hash_table.c \
 	hash_table.h \
 	list.h \
+	lodepng.c \
+	lodepng.h \
 	macros.h \
 	mesa-sha1.c \
 	mesa-sha1.h \
