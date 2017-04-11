@@ -34,7 +34,7 @@
 #define FILE_DEBUG_FLAG DEBUG_BLORP
 
 static const bool split_blorp_blit_debug = false;
-static const bool isl_surface_debug_dump = false;
+static const bool isl_surface_debug_dump = true;
 
 /**
  * Enum to specify the order of arguments in a sampler message
