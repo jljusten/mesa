@@ -44,6 +44,7 @@
 
 #define FILE_DEBUG_FLAG DEBUG_BLORP
 
+static const bool isl_stencil_debug_dump = false;
 static const bool isl_hiz_debug_dump = false;
 
 static void
@@ -1508,6 +1509,8 @@ brw_blorp_clear_depth_stencil(struct brw_context *brw,
       blorp_surf_for_miptree(brw, &stencil_surf, stencil_mt,
                              ISL_AUX_USAGE_NONE, true,
                              &stencil_level, start_layer, num_layers);
+      if (isl_stencil_debug_dump)
+         blorp_surf_dump(&brw->blorp, &stencil_surf, "stencil-clear-before");
    }
 
    assert((mask & BUFFER_BIT_DEPTH) || stencil_mask);
@@ -1530,6 +1533,8 @@ brw_blorp_clear_depth_stencil(struct brw_context *brw,
       intel_miptree_finish_write(brw, stencil_mt, level,
                                  start_layer, num_layers,
                                  ISL_AUX_USAGE_NONE);
+      if (isl_stencil_debug_dump)
+         blorp_surf_dump(&brw->blorp, &stencil_surf, "stencil-clear-after");
    }
 }
 
