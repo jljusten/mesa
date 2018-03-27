@@ -362,6 +362,11 @@ emit_3dstate_sbe(struct anv_pipeline *pipeline)
 
    /* Skip the VUE header and position slots by default */
    unsigned urb_entry_read_offset = 1;
+   if (pipeline->use_primitive_replication) {
+      /* Round down since the first position entry is accounted above. */
+      urb_entry_read_offset += anv_subpass_view_count(pipeline->subpass) / 2;
+   }
+
    int max_source_attr = 0;
    for (int attr = 0; attr < VARYING_SLOT_MAX; attr++) {
       int input_index = wm_prog_data->urb_setup[attr];
@@ -1280,7 +1285,8 @@ emit_3dstate_clip(struct anv_pipeline *pipeline,
        *    interface does not include a variable decorated with
        *    ViewportIndex, then the first viewport is used."
        */
-      if (vp_info && (last->vue_map.slots_valid & VARYING_BIT_VIEWPORT)) {
+      if ((vp_info && (last->vue_map.slots_valid & VARYING_BIT_VIEWPORT)) ||
+          pipeline->use_primitive_replication) {
          clip.MaximumVPIndex = vp_info->viewportCount - 1;
       } else {
          clip.MaximumVPIndex = 0;
@@ -1293,6 +1299,7 @@ emit_3dstate_clip(struct anv_pipeline *pipeline,
        *    the first layer is used."
        */
       clip.ForceZeroRTAIndexEnable =
+         !pipeline->use_primitive_replication &&
          !(last->vue_map.slots_valid & VARYING_BIT_LAYER);
 
 #if GEN_GEN == 7
@@ -2088,6 +2095,32 @@ compute_kill_pixel(struct anv_pipeline *pipeline,
       (ms_info && ms_info->alphaToCoverageEnable);
 }
 
+#if GEN_GEN == 12
+static void
+emit_3dstate_primitive_replication(struct anv_pipeline *pipeline)
+{
+   if (!pipeline->use_primitive_replication) {
+      anv_batch_emit(&pipeline->batch, GENX(3DSTATE_PRIMITIVE_REPLICATION), pr);
+      return;
+   }
+
+   uint32_t view_mask = pipeline->subpass->view_mask;
+   int view_count = util_bitcount(view_mask);
+   assert(view_count > 1 && view_count <= MAX_VIEWS_FOR_PRIMITIVE_REPLICATION);
+
+   anv_batch_emit(&pipeline->batch, GENX(3DSTATE_PRIMITIVE_REPLICATION), pr) {
+      pr.ReplicaMask = (1 << view_count) - 1;
+      pr.ReplicationCount = view_count - 1;
+
+      int i = 0, view_index;
+      for_each_bit(view_index, view_mask) {
+         pr.RTAIOffset[i] = view_index;
+         i++;
+      }
+   }
+}
+#endif
+
 static VkResult
 genX(graphics_pipeline_create)(
     VkDevice                                    _device,
@@ -2144,6 +2177,10 @@ genX(graphics_pipeline_create)(
                      pCreateInfo->pViewportState,
                      pCreateInfo->pRasterizationState);
    emit_3dstate_streamout(pipeline, pCreateInfo->pRasterizationState);
+
+#if GEN_GEN == 12
+   emit_3dstate_primitive_replication(pipeline);
+#endif
 
 #if 0
    /* From gen7_vs_state.c */

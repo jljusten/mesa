@@ -164,6 +164,7 @@ struct gen_perf_config;
 #define MAX_PUSH_DESCRIPTORS 32 /* Minimum requirement */
 #define MAX_INLINE_UNIFORM_BLOCK_SIZE 4096
 #define MAX_INLINE_UNIFORM_BLOCK_DESCRIPTORS 32
+#define MAX_VIEWS_FOR_PRIMITIVE_REPLICATION 16
 
 /* From the Skylake PRM Vol. 7 "Binding Table Surface State Model":
  *
@@ -2898,6 +2899,11 @@ struct anv_pipeline {
    bool                                         sample_shading_enable;
    bool                                         kill_pixel;
    bool                                         depth_bounds_test_enable;
+
+   /* When primitive replication is used, subpass->view_mask will describe what
+    * views to replicate.
+    */
+   bool                                         use_primitive_replication;
 
    struct {
       uint32_t                                  sf[7];

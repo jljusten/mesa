@@ -1900,6 +1900,10 @@ blorp_exec(struct blorp_batch *batch, const struct blorp_params *params)
    if (!(batch->flags & BLORP_BATCH_NO_EMIT_DEPTH_STENCIL))
       blorp_emit_depth_stencil_config(batch, params);
 
+#if GEN_GEN >= 12
+   blorp_emit(batch, GENX(3DSTATE_PRIMITIVE_REPLICATION), foo);
+#endif
+
    blorp_emit(batch, GENX(3DPRIMITIVE), prim) {
       prim.VertexAccessType = SEQUENTIAL;
       prim.PrimitiveTopologyType = _3DPRIM_RECTLIST;
