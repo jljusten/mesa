@@ -34,6 +34,8 @@
 
 #define FILE_DEBUG_FLAG DEBUG_BLORP
 
+static const bool isl_surface_debug_dump = false;
+
 #pragma pack(push, 1)
 struct brw_blorp_const_color_prog_key
 {
@@ -358,7 +360,13 @@ blorp_fast_clear(struct blorp_batch *batch,
                                start_layer, format, true);
    params.num_samples = params.dst.surf.samples;
 
+   if (isl_surface_debug_dump)
+      blorp_surf_dump(batch->blorp, surf, "blorp-fast-clear-before");
+
    batch->blorp->exec(batch, &params);
+
+   if (isl_surface_debug_dump)
+      blorp_surf_dump(batch->blorp, surf, "blorp-fast-clear-after");
 }
 
 union isl_color_value
@@ -1082,7 +1090,13 @@ blorp_ccs_resolve(struct blorp_batch *batch,
    if (!blorp_params_get_clear_kernel(batch, &params, true, false))
       return;
 
+   if (isl_surface_debug_dump)
+      blorp_surf_dump(batch->blorp, surf, "blorp-ccs-resolve-before");
+
    batch->blorp->exec(batch, &params);
+
+   if (isl_surface_debug_dump)
+      blorp_surf_dump(batch->blorp, surf, "blorp-ccs-resolve-after");
 }
 
 static nir_ssa_def *
@@ -1369,5 +1383,11 @@ blorp_ccs_ambiguate(struct blorp_batch *batch,
    if (!blorp_params_get_clear_kernel(batch, &params, true, false))
       return;
 
+   if (isl_surface_debug_dump)
+      blorp_surf_dump(batch->blorp, surf, "blorp-ccs-ambiguate-before");
+
    batch->blorp->exec(batch, &params);
+
+   if (isl_surface_debug_dump)
+      blorp_surf_dump(batch->blorp, surf, "blorp-ccs-ambiguate-after");
 }
