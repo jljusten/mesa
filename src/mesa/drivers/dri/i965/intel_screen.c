@@ -2463,7 +2463,7 @@ __DRIconfig **intelInitScreen2(__DRIscreen *dri_screen)
    else
       screen->no_hw = true;
 
-   if (!gen_get_device_info(devid, &screen->devinfo))
+   if (!gen_get_device_info_for_devid(devid, &screen->devinfo))
       return NULL;
 
    if (!intel_init_bufmgr(screen))

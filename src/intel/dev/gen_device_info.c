@@ -1088,7 +1088,7 @@ gen_device_info_update_from_topology(struct gen_device_info *devinfo,
 }
 
 bool
-gen_get_device_info(int devid, struct gen_device_info *devinfo)
+gen_get_device_info_for_devid(int devid, struct gen_device_info *devinfo)
 {
    switch (devid) {
 #undef CHIPSET
