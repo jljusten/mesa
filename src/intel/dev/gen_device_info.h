@@ -264,6 +264,12 @@ gen_device_info_subslice_available(const struct gen_device_info *devinfo,
 int gen_get_pci_device_id_override(void);
 int gen_device_name_to_pci_device_id(const char *name);
 bool gen_get_device_info_for_devid(int devid, struct gen_device_info *devinfo);
+bool gen_get_device_info(int devid,
+                         bool (*i915_getparam)(void *drv_ctx,
+                                               int32_t param,
+                                               int *value),
+                         void *drv_ctx,
+                         struct gen_device_info *devinfo);
 const char *gen_get_device_name(int devid);
 
 /* Used with SLICE_MASK/SUBSLICE_MASK values from DRM_I915_GETPARAM. */

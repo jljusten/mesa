@@ -1139,6 +1139,27 @@ gen_get_device_info_for_devid(int devid, struct gen_device_info *devinfo)
    return true;
 }
 
+bool
+gen_get_device_info(int devid,
+                    bool (*i915_getparam)(void *drv_ctx,
+                                          int32_t param,
+                                          int *value),
+                    void *drv_ctx,
+                    struct gen_device_info *devinfo)
+{
+   if (devid <= 0) {
+      if (!i915_getparam(drv_ctx, I915_PARAM_CHIPSET_ID, &devid))
+         return false;
+      if (devid <= 0)
+         return false;
+   }
+
+   if (!gen_get_device_info_for_devid(devid, devinfo))
+      return false;
+
+   return true;
+}
+
 const char *
 gen_get_device_name(int devid)
 {
