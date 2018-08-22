@@ -2419,6 +2419,14 @@ shader_perf_log_mesa(void *data, const char *fmt, ...)
    va_end(args);
 }
 
+static bool
+devinfo_getparam(void *drv_ctx, int32_t param, int *value)
+{
+   struct intel_screen *screen = drv_ctx;
+   *value = intel_get_integer(screen, param);
+   return true;
+}
+
 /**
  * This is the driver specific part of the createNewScreen entry point.
  * Called when using DRI2.
@@ -2458,12 +2466,10 @@ __DRIconfig **intelInitScreen2(__DRIscreen *dri_screen)
    dri_screen->driverPrivate = (void *) screen;
 
    int devid = gen_get_pci_device_id_override();
-   if (devid < 0)
-      devid = intel_get_integer(screen, I915_PARAM_CHIPSET_ID);
-   else
+   if (devid > 0)
       screen->no_hw = true;
 
-   if (!gen_get_device_info_for_devid(devid, &screen->devinfo))
+   if (!gen_get_device_info(devid, devinfo_getparam, screen, &screen->devinfo))
       return NULL;
 
    if (!intel_init_bufmgr(screen))
