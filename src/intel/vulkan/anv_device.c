@@ -305,6 +305,14 @@ anv_physical_device_free_disk_cache(struct anv_physical_device *device)
 #endif
 }
 
+static bool
+devinfo_getparam(void *drv_ctx, int32_t param, int *value)
+{
+   int fd = *(int*)drv_ctx;
+   *value = anv_gem_get_param(fd, param);
+   return true;
+}
+
 static VkResult
 anv_physical_device_init(struct anv_physical_device *device,
                          struct anv_instance *instance,
@@ -330,21 +338,15 @@ anv_physical_device_init(struct anv_physical_device *device,
    device->no_hw = getenv("INTEL_NO_HW") != NULL;
 
    int devid = gen_get_pci_device_id_override();
-   if (devid < 0) {
-      devid = anv_gem_get_param(fd, I915_PARAM_CHIPSET_ID);
-      if (!devid) {
-         result = vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
-         goto fail;
-      }
-   } else {
+   if (devid > 0)
       device->no_hw = true;
-   }
 
-   device->name = gen_get_device_name(devid);
-   if (!gen_get_device_info_for_devid(devid, &device->info)) {
+   if (!gen_get_device_info(devid, devinfo_getparam, &fd, &device->info)) {
       result = vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
       goto fail;
    }
+   devid = device->info.devid;
+   device->name = gen_get_device_name(devid);
 
    if (device->info.is_haswell) {
       intel_logw("Haswell Vulkan support is incomplete");
