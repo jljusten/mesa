@@ -1480,7 +1480,7 @@ brw_query_renderer_integer(__DRIscreen *dri_screen,
       value[0] = 0x8086;
       return 0;
    case __DRI2_RENDERER_DEVICE_ID:
-      value[0] = screen->deviceID;
+      value[0] = screen->devinfo.devid;
       return 0;
    case __DRI2_RENDERER_ACCELERATED:
       value[0] = 1;
@@ -2457,13 +2457,13 @@ __DRIconfig **intelInitScreen2(__DRIscreen *dri_screen)
    screen->driScrnPriv = dri_screen;
    dri_screen->driverPrivate = (void *) screen;
 
-   screen->deviceID = gen_get_pci_device_id_override();
-   if (screen->deviceID < 0)
-      screen->deviceID = intel_get_integer(screen, I915_PARAM_CHIPSET_ID);
+   int devid = gen_get_pci_device_id_override();
+   if (devid < 0)
+      devid = intel_get_integer(screen, I915_PARAM_CHIPSET_ID);
    else
       screen->no_hw = true;
 
-   if (!gen_get_device_info(screen->deviceID, &screen->devinfo))
+   if (!gen_get_device_info(devid, &screen->devinfo))
       return NULL;
 
    if (!intel_init_bufmgr(screen))

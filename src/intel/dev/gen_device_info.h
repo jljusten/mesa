@@ -45,6 +45,7 @@ struct drm_i915_query_topology_info;
  */
 struct gen_device_info
 {
+   int devid;
    int gen; /**< Generation number: 4, 5, 6, 7, ... */
    int gt;
 

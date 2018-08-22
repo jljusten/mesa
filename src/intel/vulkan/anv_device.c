@@ -245,8 +245,8 @@ anv_physical_device_init_uuids(struct anv_physical_device *device)
     */
    _mesa_sha1_init(&sha1_ctx);
    _mesa_sha1_update(&sha1_ctx, build_id_data(note), build_id_len);
-   _mesa_sha1_update(&sha1_ctx, &device->chipset_id,
-                     sizeof(device->chipset_id));
+   _mesa_sha1_update(&sha1_ctx, &device->info.devid,
+                     sizeof(device->info.devid));
    _mesa_sha1_final(&sha1_ctx, sha1);
    memcpy(device->pipeline_cache_uuid, sha1, VK_UUID_SIZE);
 
@@ -264,8 +264,8 @@ anv_physical_device_init_uuids(struct anv_physical_device *device)
     * some bits of ISL info to ensure that this is safe.
     */
    _mesa_sha1_init(&sha1_ctx);
-   _mesa_sha1_update(&sha1_ctx, &device->chipset_id,
-                     sizeof(device->chipset_id));
+   _mesa_sha1_update(&sha1_ctx, &device->info.devid,
+                     sizeof(device->info.devid));
    _mesa_sha1_update(&sha1_ctx, &device->isl_dev.has_bit6_swizzling,
                      sizeof(device->isl_dev.has_bit6_swizzling));
    _mesa_sha1_final(&sha1_ctx, sha1);
@@ -280,7 +280,7 @@ anv_physical_device_init_disk_cache(struct anv_physical_device *device)
 #ifdef ENABLE_SHADER_CACHE
    char renderer[10];
    MAYBE_UNUSED int len = snprintf(renderer, sizeof(renderer), "anv_%04x",
-                                   device->chipset_id);
+                                   device->info.devid);
    assert(len == sizeof(renderer) - 2);
 
    char timestamp[41];
@@ -329,20 +329,19 @@ anv_physical_device_init(struct anv_physical_device *device,
 
    device->no_hw = getenv("INTEL_NO_HW") != NULL;
 
-   const int pci_id_override = gen_get_pci_device_id_override();
-   if (pci_id_override < 0) {
-      device->chipset_id = anv_gem_get_param(fd, I915_PARAM_CHIPSET_ID);
-      if (!device->chipset_id) {
+   int devid = gen_get_pci_device_id_override();
+   if (devid < 0) {
+      devid = anv_gem_get_param(fd, I915_PARAM_CHIPSET_ID);
+      if (!devid) {
          result = vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
          goto fail;
       }
    } else {
-      device->chipset_id = pci_id_override;
       device->no_hw = true;
    }
 
-   device->name = gen_get_device_name(device->chipset_id);
-   if (!gen_get_device_info(device->chipset_id, &device->info)) {
+   device->name = gen_get_device_name(devid);
+   if (!gen_get_device_info(devid, &device->info)) {
       result = vk_error(VK_ERROR_INCOMPATIBLE_DRIVER);
       goto fail;
    }
@@ -1051,7 +1050,7 @@ void anv_GetPhysicalDeviceProperties(
       .apiVersion = anv_physical_device_api_version(pdevice),
       .driverVersion = vk_get_driver_version(),
       .vendorID = 0x8086,
-      .deviceID = pdevice->chipset_id,
+      .deviceID = pdevice->info.devid,
       .deviceType = VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
       .limits = limits,
       .sparseProperties = {0}, /* Broadwell doesn't do sparse. */
@@ -1600,7 +1599,6 @@ VkResult anv_CreateDevice(
 
    device->_loader_data.loaderMagic = ICD_LOADER_MAGIC;
    device->instance = physical_device->instance;
-   device->chipset_id = physical_device->chipset_id;
    device->no_hw = physical_device->no_hw;
    device->lost = false;
 

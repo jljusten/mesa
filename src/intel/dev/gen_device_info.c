@@ -1100,6 +1100,8 @@ gen_get_device_info(int devid, struct gen_device_info *devinfo)
       return false;
    }
 
+   devinfo->devid = devid;
+
    fill_masks(devinfo);
 
    /* From the Skylake PRM, 3DSTATE_PS::Scratch Space Base Pointer:

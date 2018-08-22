@@ -105,7 +105,7 @@ brw_get_renderer_string(const struct intel_screen *screen)
    static char buffer[128];
    char *bsw = NULL;
 
-   switch (screen->deviceID) {
+   switch (screen->devinfo.devid) {
 #undef CHIPSET
 #define CHIPSET(id, symbol, str) case id: chipset = str; break;
 #include "pci_ids/i965_pci_ids.h"
@@ -115,7 +115,7 @@ brw_get_renderer_string(const struct intel_screen *screen)
    }
 
    /* Braswell branding is funny, so we have to fix it up here */
-   if (screen->deviceID == 0x22B1) {
+   if (screen->devinfo.devid == 0x22B1) {
       bsw = strdup(chipset);
       char *needle = strstr(bsw, "XXX");
       if (needle) {
@@ -367,7 +367,7 @@ brw_init_driver_functions(struct brw_context *brw,
       functions->GetSamplePosition = gen6_get_sample_position;
 
    /* GL_ARB_get_program_binary */
-   brw_program_binary_init(brw->screen->deviceID);
+   brw_program_binary_init(brw->screen->devinfo.devid);
    functions->GetProgramBinaryDriverSHA1 = brw_get_program_binary_driver_sha1;
    functions->ProgramBinarySerializeDriverBlob = brw_serialize_program_binary;
    functions->ProgramBinaryDeserializeDriverBlob =

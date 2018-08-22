@@ -832,7 +832,6 @@ struct anv_physical_device {
     VK_LOADER_DATA                              _loader_data;
 
     struct anv_instance *                       instance;
-    uint32_t                                    chipset_id;
     bool                                        no_hw;
     char                                        path[20];
     const char *                                name;
@@ -963,7 +962,6 @@ struct anv_device {
     VkAllocationCallbacks                       alloc;
 
     struct anv_instance *                       instance;
-    uint32_t                                    chipset_id;
     bool                                        no_hw;
     struct gen_device_info                      info;
     struct isl_device                           isl_dev;
