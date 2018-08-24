@@ -311,6 +311,7 @@ st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
       velements[i].instance_divisor = 0;
       velements[i].vertex_buffer_index = 0;
       velements[i].src_format = PIPE_FORMAT_R32G32B32A32_FLOAT;
+      velements[i].is_edge_flag = false;
    }
    cso_set_vertex_elements(cso, numAttribs, velements);
    cso_set_stream_outputs(cso, 0, NULL, NULL);

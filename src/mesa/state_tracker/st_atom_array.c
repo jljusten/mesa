@@ -315,6 +315,7 @@ static void init_velement(struct pipe_vertex_element *velement,
    velement->src_format = format;
    velement->instance_divisor = instance_divisor;
    velement->vertex_buffer_index = vbo_index;
+   velement->is_edge_flag = false;
    assert(velement->src_format);
 }
 
@@ -442,6 +443,9 @@ st_setup_arrays(struct st_context *st,
          init_velement_lowered(vp, velements, &attrib->Format, off,
                                binding->InstanceDivisor, bufidx,
                                input_to_index[attr]);
+
+         if (attr == VERT_ATTRIB_EDGEFLAG)
+            velements[input_to_index[attr]].is_edge_flag = true;
       }
    }
 }

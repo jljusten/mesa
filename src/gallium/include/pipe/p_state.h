@@ -672,6 +672,9 @@ struct pipe_vertex_element
     *  n means per-instance data used for n consecutive instances (n > 0).
     */
    unsigned instance_divisor;
+
+   /** Is this the special "edge flag" value? */
+   bool is_edge_flag;
 };
 
 
