@@ -305,6 +305,8 @@ genX(blorp_exec)(struct blorp_batch *batch,
 
    enum brw_pipeline pipeline =
       params->compute_program ? BRW_COMPUTE_PIPELINE : BRW_RENDER_PIPELINE;
+   //fprintf(stderr, "pipeline: %s\n",
+   //        pipeline == BRW_COMPUTE_PIPELINE ? "compute" : "render");
    brw_select_pipeline(brw, pipeline);
 
 retry:

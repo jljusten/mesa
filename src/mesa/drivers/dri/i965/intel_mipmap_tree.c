@@ -276,7 +276,7 @@ intel_miptree_supports_ccs_e(struct brw_context *brw,
 {
    const struct gen_device_info *devinfo = &brw->screen->devinfo;
 
-   if (devinfo->gen < 9)
+   if (devinfo->gen < 9 || unlikely((INTEL_DEBUG & DEBUG_CS_OPS) && 0))
       return false;
 
    /* For now compression is only enabled for integer formats even though

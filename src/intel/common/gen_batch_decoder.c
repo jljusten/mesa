@@ -369,7 +369,7 @@ handle_media_interface_descriptor_load(struct gen_batch_decode_ctx *ctx,
       printf("\n");
 
       dump_samplers(ctx, sampler_offset, sampler_count);
-      dump_binding_table(ctx, binding_table_offset, binding_entry_count);
+      dump_binding_table(ctx, binding_table_offset, -1);
 
       desc_map += desc->dw_length;
       desc_addr += desc->dw_length * 4;

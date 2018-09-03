@@ -1300,6 +1300,7 @@ do_single_blorp_clear(struct brw_context *brw, struct gl_framebuffer *fb,
       intel_miptree_prepare_access(brw, irb->mt, level, 1, irb->mt_layer,
                                    num_layers, ISL_AUX_USAGE_NONE, false);
    }
+   can_fast_clear = false;
 
    if (can_fast_clear) {
       const enum isl_aux_state aux_state =
