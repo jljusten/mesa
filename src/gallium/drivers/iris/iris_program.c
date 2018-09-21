@@ -981,7 +981,7 @@ iris_compile_vs(struct iris_context *ice,
 
    brw_compute_vue_map(devinfo,
                        &vue_prog_data->vue_map, nir->info.outputs_written,
-                       nir->info.separate_shader);
+                       nir->info.separate_shader, /* pos_slots */ 1);
 
    /* Don't tell the backend about our clip plane constants, we've already
     * lowered them in NIR and we don't want it doing it again.
@@ -1439,7 +1439,7 @@ iris_compile_gs(struct iris_context *ice,
 
    brw_compute_vue_map(devinfo,
                        &vue_prog_data->vue_map, nir->info.outputs_written,
-                       nir->info.separate_shader);
+                       nir->info.separate_shader, /* pos_slots */ 1);
 
    char *error_str = NULL;
    const unsigned *program =
