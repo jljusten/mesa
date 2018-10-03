@@ -232,7 +232,6 @@ create_batch(struct iris_batch *batch)
    batch->bo->kflags |= EXEC_OBJECT_CAPTURE;
    batch->map = iris_bo_map(NULL, batch->bo, MAP_READ | MAP_WRITE);
    batch->map_next = batch->map;
-   batch->contains_draw = false;
 
    add_exec_bo(batch, batch->bo);
 }
@@ -246,6 +245,7 @@ iris_batch_reset(struct iris_batch *batch)
    }
    batch->last_bo = batch->bo;
    batch->primary_batch_size = 0;
+   batch->contains_draw = false;
 
    create_batch(batch);
    assert(batch->bo->index == 0);
