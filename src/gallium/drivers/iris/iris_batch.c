@@ -331,6 +331,17 @@ iris_finish_batch(struct iris_batch *batch)
       batch->primary_batch_size = iris_batch_bytes_used(batch);
 }
 
+static bool
+iris_gpu_reset(struct iris_batch *batch)
+{
+   struct iris_screen *screen = batch->screen;
+   struct drm_i915_reset_stats stats = { .ctx_id = batch->hw_ctx_id };
+
+   int ret = drm_ioctl(screen->fd, DRM_IOCTL_I915_GET_RESET_STATS, &stats);
+
+   return ret == 0 && (stats.batch_active > 0 || stats.batch_pending > 0);
+}
+
 /**
  * Submit the batch to the GPU via execbuffer2.
  */
@@ -396,6 +407,15 @@ submit_batch(struct iris_batch *batch, int in_fence_fd, int *out_fence_fd)
 
    if (ret == 0 && out_fence_fd != NULL)
       *out_fence_fd = execbuf.rsvd2 >> 32;
+
+   if (unlikely(INTEL_DEBUG & DEBUG_ANGRY)) {
+      iris_bo_wait_rendering(batch->bo);
+      if (iris_gpu_reset(batch)) {
+         fprintf(stderr, "GPU HANG!\n");
+         decode_batch(batch);
+         _exit(1);
+      }
+   }
 
    return ret;
 }
