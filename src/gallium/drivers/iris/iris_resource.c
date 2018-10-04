@@ -739,8 +739,8 @@ iris_map_tiled_memcpy(struct iris_transfer *map)
    if (!(xfer->usage & PIPE_TRANSFER_DISCARD_RANGE)) {
       char *src = iris_bo_map(map->dbg, res->bo, xfer->usage | MAP_RAW);
 
-      const isl_mem_copy_fn fn = util_cpu_caps.has_sse4_1 ?
-         (isl_mem_copy_fn) _mesa_streaming_load_memcpy : memcpy;
+      const isl_mem_copy_fn fn = memcpy; // XXX: util_cpu_caps.has_sse4_1 ?
+         // XXX: (isl_mem_copy_fn) _mesa_streaming_load_memcpy : memcpy;
 
       struct pipe_box box = xfer->box;
 
