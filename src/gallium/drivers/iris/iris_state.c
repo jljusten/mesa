@@ -1374,9 +1374,9 @@ iris_create_sampler_view(struct pipe_context *ctx,
                             .address = itex->bo->gtt_offset +
                                        tmpl->u.buf.offset,
                             // XXX: buffer_texture_range_size from i965?
-                            .size = tmpl->u.buf.size,
+                            .size_B = tmpl->u.buf.size,
                             .format = isv->view.format,
-                            .stride = cpp,
+                            .stride_B = cpp,
                             .mocs = MOCS_WB);
    }
 
@@ -1896,9 +1896,9 @@ iris_set_constant_buffer(struct pipe_context *ctx,
 
       isl_buffer_fill_state(&screen->isl_dev, map,
                             .address = res->bo->gtt_offset + cbuf->data.offset,
-                            .size = input->buffer_size,
+                            .size_B = input->buffer_size,
                             .format = ISL_FORMAT_R32G32B32A32_FLOAT,
-                            .stride = 1,
+                            .stride_B = 1,
                             .mocs = MOCS_WB)
    } else {
       pipe_resource_reference(&cbuf->data.res, NULL);
@@ -1953,9 +1953,9 @@ iris_set_shader_buffers(struct pipe_context *ctx,
          isl_buffer_fill_state(&screen->isl_dev, map,
                                .address =
                                   res->bo->gtt_offset + buffer->buffer_offset,
-                               .size = buffer->buffer_size,
+                               .size_B = buffer->buffer_size,
                                .format = ISL_FORMAT_RAW,
-                               .stride = 1,
+                               .stride_B = 1,
                                .mocs = MOCS_WB);
       } else {
          pipe_resource_reference(&shs->ssbo[start_slot + i], NULL);

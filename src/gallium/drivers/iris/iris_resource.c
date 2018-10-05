@@ -313,8 +313,8 @@ iris_resource_create_with_modifiers(struct pipe_screen *pscreen,
                     .levels = templ->last_level + 1,
                     .array_len = templ->array_size,
                     .samples = MAX2(templ->nr_samples, 1),
-                    .min_alignment = 0,
-                    .row_pitch = 0,
+                    .min_alignment_B = 0,
+                    .row_pitch_B = 0,
                     .usage = usage,
                     .tiling_flags = 1 << tiling);
    assert(isl_surf_created_successfully);
@@ -332,10 +332,10 @@ iris_resource_create_with_modifiers(struct pipe_screen *pscreen,
       name = "dynamic state";
    }
 
-   res->bo = iris_bo_alloc_tiled(screen->bufmgr, name, res->surf.size,
+   res->bo = iris_bo_alloc_tiled(screen->bufmgr, name, res->surf.size_B,
                                  memzone,
                                  isl_tiling_to_i915_tiling(res->surf.tiling),
-                                 res->surf.row_pitch, 0);
+                                 res->surf.row_pitch_B, 0);
    if (!res->bo)
       goto fail;
 
@@ -400,8 +400,8 @@ iris_resource_from_user_memory(struct pipe_screen *pscreen,
                  .levels = templ->last_level + 1,
                  .array_len = templ->array_size,
                  .samples = MAX2(templ->nr_samples, 1),
-                 .min_alignment = 0,
-                 .row_pitch = 0,
+                 .min_alignment_B = 0,
+                 .row_pitch_B = 0,
                  .usage = isl_usage,
                  .tiling_flags = 1 << ISL_TILING_LINEAR);
 
@@ -462,8 +462,8 @@ iris_resource_from_handle(struct pipe_screen *pscreen,
                  .levels = templ->last_level + 1,
                  .array_len = templ->array_size,
                  .samples = MAX2(templ->nr_samples, 1),
-                 .min_alignment = 0,
-                 .row_pitch = 0,
+                 .min_alignment_B = 0,
+                 .row_pitch_B = 0,
                  .usage = isl_usage,
                  .tiling_flags = 1 << mod_info->tiling);
 
@@ -485,7 +485,7 @@ iris_resource_get_handle(struct pipe_screen *pscreen,
 {
    struct iris_resource *res = (struct iris_resource *)resource;
 
-   whandle->stride = res->surf.row_pitch;
+   whandle->stride = res->surf.row_pitch_B;
    whandle->modifier = tiling_to_modifier(res->bo->tiling_mode);
 
    switch (whandle->type) {
@@ -588,7 +588,7 @@ iris_unmap_s8(struct iris_transfer *map)
 
          for (uint32_t y = 0; y < box.height; y++) {
             for (uint32_t x = 0; x < box.width; x++) {
-               ptrdiff_t offset = s8_offset(surf->row_pitch,
+               ptrdiff_t offset = s8_offset(surf->row_pitch_B,
                                             x0_el + box.x + x,
                                             y0_el + box.y + y,
                                             has_swizzling);
@@ -611,7 +611,7 @@ iris_map_s8(struct iris_transfer *map)
    struct iris_resource *res = (struct iris_resource *) xfer->resource;
    struct isl_surf *surf = &res->surf;
 
-   xfer->stride = surf->row_pitch;
+   xfer->stride = surf->row_pitch_B;
    xfer->layer_stride = xfer->stride * xfer->box.height;
 
    /* The tiling and detiling functions require that the linear buffer has
@@ -641,7 +641,7 @@ iris_map_s8(struct iris_transfer *map)
 
          for (uint32_t y = 0; y < box.height; y++) {
             for (uint32_t x = 0; x < box.width; x++) {
-               ptrdiff_t offset = s8_offset(surf->row_pitch,
+               ptrdiff_t offset = s8_offset(surf->row_pitch_B,
                                             x0_el + box.x + x,
                                             y0_el + box.y + y,
                                             has_swizzling);
@@ -701,7 +701,7 @@ iris_unmap_tiled_memcpy(struct iris_transfer *map)
 
          void *ptr = map->ptr + s * xfer->layer_stride;
 
-         isl_linear_to_tiled(x1, x2, y1, y2, dst, ptr, surf->row_pitch,
+         isl_linear_to_tiled(x1, x2, y1, y2, dst, ptr, surf->row_pitch_B,
                              xfer->stride, has_swizzling, surf->tiling,
                              memcpy);
          box.z++;
@@ -718,7 +718,7 @@ iris_map_tiled_memcpy(struct iris_transfer *map)
    struct iris_resource *res = (struct iris_resource *) xfer->resource;
    struct isl_surf *surf = &res->surf;
 
-   xfer->stride = ALIGN(surf->row_pitch, 16);
+   xfer->stride = ALIGN(surf->row_pitch_B, 16);
    xfer->layer_stride = xfer->stride * xfer->box.height;
 
    unsigned x1, x2, y1, y2;
@@ -756,7 +756,8 @@ iris_map_tiled_memcpy(struct iris_transfer *map)
          void *ptr = map->ptr + s * xfer->layer_stride;
 
          isl_tiled_to_linear(x1, x2, y1, y2, ptr, src, xfer->stride,
-                             surf->row_pitch, has_swizzling, surf->tiling, fn);
+                             surf->row_pitch_B, has_swizzling, surf->tiling,
+                             fn);
          box.z++;
       }
    }
@@ -777,7 +778,7 @@ iris_map_direct(struct iris_transfer *map)
 
    get_image_offset_el(surf, xfer->level, box->z, &x0_el, &y0_el);
 
-   xfer->stride = isl_surf_get_row_pitch(surf);
+   xfer->stride = isl_surf_get_row_pitch_B(surf);
    xfer->layer_stride = isl_surf_get_array_pitch(surf);
 
    void *ptr = iris_bo_map(map->dbg, res->bo, xfer->usage);
