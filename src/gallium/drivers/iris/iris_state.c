@@ -4174,7 +4174,7 @@ get_post_sync_flags(enum pipe_control_flags flags)
    /* Only one "Post Sync Op" is allowed, and it's mutually exclusive with
     * "LRI Post Sync Operation".  So more than one bit set would be illegal.
     */
-   assert(_mesa_bitcount(flags) <= 1);
+   assert(util_bitcount(flags) <= 1);
 
    return flags;
 }
