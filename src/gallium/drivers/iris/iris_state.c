@@ -1853,7 +1853,7 @@ iris_set_framebuffer_state(struct pipe_context *ctx,
 
    /* The PIPE_CONTROL command description says:
     *
-    *   "Whenever a Binding Table Index (BTI) used by a Render Taget Message
+    *   "Whenever a Binding Table Index (BTI) used by a Render Target Message
     *    points to a different RENDER_SURFACE_STATE, SW must issue a Render
     *    Target Cache Flush by enabling this bit. When render target flush
     *    is set due to new association of BTI, PS Scoreboard Stall bit must
