@@ -4166,6 +4166,13 @@ iris_upload_render_state(struct iris_context *ice,
     */
    iris_use_pinned_bo(batch, ice->state.binder.bo, false);
 
+   iris_emit_cmd(batch, GENX(PIPELINE_SELECT), sel) {
+#if GEN_GEN >= 9
+      sel.MaskBits = 3;
+#endif
+      sel.PipelineSelection = _3D;
+   }
+
    iris_upload_dirty_render_state(ice, batch, draw);
 
    if (draw->index_size > 0) {
@@ -4278,6 +4285,13 @@ iris_upload_compute_state(struct iris_context *ice,
       ice->shaders.prog[MESA_SHADER_COMPUTE];
    struct brw_stage_prog_data *prog_data = shader->prog_data;
    struct brw_cs_prog_data *cs_prog_data = (void *) prog_data;
+
+   iris_emit_cmd(batch, GENX(PIPELINE_SELECT), sel) {
+#if GEN_GEN >= 9
+      sel.MaskBits = 3;
+#endif
+      sel.PipelineSelection = GPGPU;
+   }
 
    struct pipe_resource *grid_size_res = NULL;
    uint32_t grid_size_offset;

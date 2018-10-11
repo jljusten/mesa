@@ -249,6 +249,13 @@ iris_blorp_exec(struct blorp_batch *blorp_batch,
    struct iris_context *ice = blorp_batch->blorp->driver_ctx;
    struct iris_batch *batch = blorp_batch->driver_batch;
 
+   blorp_emit(blorp_batch, GENX(PIPELINE_SELECT), sel) {
+#if GEN_GEN >= 9
+      sel.MaskBits = 3;
+#endif
+      sel.PipelineSelection = _3D;
+   }
+
 #if GEN_GEN >= 11
    /* The PIPE_CONTROL command description says:
     *
