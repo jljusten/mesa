@@ -1532,7 +1532,7 @@ iris_set_shader_images(struct pipe_context *ctx,
 
          isl_surf_usage_flags_t usage = ISL_SURF_USAGE_STORAGE_BIT;
          enum isl_format isl_format =
-            iris_isl_format_for_usage(devinfo, img->format, usage);
+            iris_format_for_usage(devinfo, img->format, usage).fmt;
          if (img->shader_access & PIPE_IMAGE_ACCESS_READ)
             isl_format = isl_lower_storage_image_format(devinfo, isl_format);
 
@@ -1564,9 +1564,9 @@ iris_set_shader_images(struct pipe_context *ctx,
             isl_buffer_fill_state(&screen->isl_dev, map,
                                   .address = res->bo->gtt_offset,
                                   // XXX: buffer_texture_range_size from i965?
-                                  .size = res->base.width0,
+                                  .size_B = res->base.width0,
                                   .format = isl_format,
-                                  .stride = cpp,
+                                  .stride_B = cpp,
                                   .mocs = MOCS_WB);
          }
       } else {
