@@ -877,7 +877,8 @@ iris_transfer_unmap(struct pipe_context *ctx, struct pipe_transfer *xfer)
                        |  IRIS_DIRTY_CONSTANTS_TCS | IRIS_DIRTY_BINDINGS_TCS
                        |  IRIS_DIRTY_CONSTANTS_TES | IRIS_DIRTY_BINDINGS_TES
                        |  IRIS_DIRTY_CONSTANTS_GS  | IRIS_DIRTY_BINDINGS_GS
-                       |  IRIS_DIRTY_CONSTANTS_FS  | IRIS_DIRTY_BINDINGS_FS;
+                       |  IRIS_DIRTY_CONSTANTS_FS  | IRIS_DIRTY_BINDINGS_FS
+                       |  IRIS_DIRTY_CONSTANTS_CS  | IRIS_DIRTY_BINDINGS_CS;
    }
 
    pipe_resource_reference(&xfer->resource, NULL);

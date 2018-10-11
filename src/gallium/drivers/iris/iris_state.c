@@ -3418,6 +3418,16 @@ iris_populate_binding_table(struct iris_context *ice,
 
    for (int i = 0; i < shs->num_textures; i++) {
       struct iris_sampler_view *view = shs->textures[i];
+      if (stage == MESA_SHADER_COMPUTE) {
+         struct iris_bo *bo = iris_resource_bo(view->base.texture);
+         //if (iris_batch_references(&ice->blorp_batch, bo))
+         //   iris_batch_flush(&ice->blorp_batch);
+         //if (iris_batch_references(&ice->render_batch, bo))
+         //iris_batch_flush(&ice->render_batch);
+         uint32_t *map = iris_bo_map(NULL, bo, MAP_READ | MAP_RAW);
+         map[0] = 0xffff0000;
+         iris_bo_wait(bo, -1);
+      }
       uint32_t addr = view ? use_sampler_view(batch, view)
                            : use_null_surface(batch, ice);
       push_bt_entry(addr);
@@ -4285,6 +4295,9 @@ iris_upload_compute_state(struct iris_context *ice,
       ice->shaders.prog[MESA_SHADER_COMPUTE];
    struct brw_stage_prog_data *prog_data = shader->prog_data;
    struct brw_cs_prog_data *cs_prog_data = (void *) prog_data;
+
+   iris_batch_flush(&ice->render_batch);
+   iris_bo_wait_rendering(ice->render_batch.bo);
 
    iris_emit_cmd(batch, GENX(PIPELINE_SELECT), sel) {
 #if GEN_GEN >= 9
