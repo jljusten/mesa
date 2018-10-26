@@ -30,6 +30,7 @@
 
 #include "blorp_priv.h"
 #include "compiler/brw_eu_defines.h"
+#include "dev/intel_debug.h"
 
 #include "blorp_nir_builder.h"
 
@@ -557,7 +558,7 @@ blorp_clear(struct blorp_batch *batch,
    params.snapshot_type = INTEL_SNAPSHOT_SLOW_COLOR_CLEAR;
 
    bool compute;
-   if (batch->flags & BLORP_BATCH_USE_COMPUTE) {
+   if (batch->flags & BLORP_BATCH_USE_COMPUTE || INTEL_DEBUG & DEBUG_BLOCS) {
       UNUSED bool color_masked =
          color_write_disable &&
          (color_write_disable[0] || color_write_disable[1] ||
@@ -565,8 +566,9 @@ blorp_clear(struct blorp_batch *batch,
       bool blocs_supported =
          blorp_clear_supports_compute(batch->blorp, color_masked,
                                       false, surf->aux_usage);
-      assert(blocs_supported);
-      compute = true;
+      bool require_blocs = batch->flags & BLORP_BATCH_USE_COMPUTE;
+      assert(!require_blocs || blocs_supported);
+      compute = blocs_supported;
    } else {
       compute = false;
    }
