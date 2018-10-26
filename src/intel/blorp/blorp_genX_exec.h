@@ -1971,17 +1971,8 @@ blorp_update_clear_color(UNUSED struct blorp_batch *batch,
    }
 }
 
-/**
- * \brief Execute a blit or render pass operation.
- *
- * To execute the operation, this function manually constructs and emits a
- * batch to draw a rectangle primitive. The batchbuffer is flushed before
- * constructing and after emitting the batch.
- *
- * This function alters no GL state.
- */
 static void
-blorp_exec(struct blorp_batch *batch, const struct blorp_params *params)
+blorp_exec_3d(struct blorp_batch *batch, const struct blorp_params *params)
 {
    if (!(batch->flags & BLORP_BATCH_NO_UPDATE_CLEAR_COLOR)) {
       blorp_update_clear_color(batch, &params->dst, params->fast_clear_op);
@@ -2016,6 +2007,337 @@ blorp_exec(struct blorp_batch *batch, const struct blorp_params *params)
       prim.VertexCountPerInstance = 3;
       prim.InstanceCount = params->num_layers;
    }
+}
+
+#if GFX_VER >= 7
+
+static void
+blorp_get_compute_push_const(struct blorp_batch *batch,
+                             const struct blorp_params *params,
+                             uint32_t threads,
+                             uint32_t *state_offset,
+                             unsigned *state_size)
+{
+   const struct brw_cs_prog_data *cs_prog_data = params->cs_prog_data;
+   const unsigned push_const_size =
+      ALIGN(brw_cs_push_const_total_size(cs_prog_data, threads), 64);
+
+   if (push_const_size == 0) {
+      *state_offset = 0;
+      *state_size = 0;
+      return;
+   }
+
+   assert(GFX_VERx10 < 125 || cs_prog_data->push.per_thread.size == 0);
+
+   uint32_t push_const_offset;
+   uint32_t *push_const =
+      GFX_VERx10 >= 125 ?
+      blorp_alloc_general_state(batch, push_const_size, 64,
+                                &push_const_offset) :
+      blorp_alloc_dynamic_state(batch, push_const_size, 64,
+                                &push_const_offset);
+   memset(push_const, 0x0, ALIGN(push_const_size, 64));
+
+   void *dst = push_const;
+   const void *src = (char *)&params->wm_inputs;
+
+   if (cs_prog_data->push.cross_thread.size > 0) {
+      memcpy(dst, src, cs_prog_data->push.cross_thread.size);
+      dst += cs_prog_data->push.cross_thread.size;
+      src += cs_prog_data->push.cross_thread.size;
+   }
+
+   if (cs_prog_data->push.per_thread.size > 0) {
+      for (unsigned t = 0; t < threads; t++) {
+         memcpy(dst, src, (cs_prog_data->push.per_thread.dwords - 1) * 4);
+
+         uint32_t *subgroup_id = dst + cs_prog_data->push.per_thread.size - 4;
+         *subgroup_id = t;
+
+         dst += cs_prog_data->push.per_thread.size;
+      }
+   }
+
+   *state_offset = push_const_offset;
+   *state_size = push_const_size;
+}
+
+#if GFX_VERx10 >= 125
+
+static bool
+blorp_emit_compute_state(struct blorp_batch *batch,
+                         const struct blorp_params *params)
+{
+   const uint32_t subslices = MAX2(/*brw->screen->subslice_total*/ 1, 1);
+   const struct intel_device_info *devinfo = batch->blorp->compiler->devinfo;
+
+   blorp_emit(batch, GENX(CFE_STATE), cfe) {
+      cfe.MaximumNumberofThreads =
+         devinfo->max_cs_threads * subslices - 1;
+   }
+
+   return false;
+}
+
+#else /* GFX_VERx10 >= 125 */
+
+static bool
+blorp_emit_compute_state(struct blorp_batch *batch,
+                         const struct blorp_params *params)
+{
+   const struct brw_cs_prog_data *cs_prog_data = params->cs_prog_data;
+   const struct brw_stage_prog_data *prog_data = &cs_prog_data->base;
+   const struct brw_cs_dispatch_info dispatch =
+      brw_cs_get_dispatch_info(batch->blorp->compiler->devinfo, cs_prog_data,
+                               NULL);
+
+   /* The MEDIA_VFE_STATE documentation for Gfx8+ says:
+    *
+    * "A stalling PIPE_CONTROL is required before MEDIA_VFE_STATE unless
+    *  the only bits that are changed are scoreboard related: Scoreboard
+    *  Enable, Scoreboard Type, Scoreboard Mask, Scoreboard * Delta. For
+    *  these scoreboard related states, a MEDIA_STATE_FLUSH is sufficient."
+    *
+    * Earlier generations say "MI_FLUSH" instead of "stalling PIPE_CONTROL",
+    * but MI_FLUSH isn't really a thing, so we assume they meant PIPE_CONTROL.
+    */
+   blorp_emit(batch, GENX(PIPE_CONTROL), pc) {
+      pc.CommandStreamerStallEnable = true;
+      pc.StallAtPixelScoreboard = true;
+   }
+
+   blorp_emit(batch, GENX(MEDIA_VFE_STATE), vfe) {
+      assert(prog_data->total_scratch == 0);
+
+      /* If brw->screen->subslice_total is greater than one, then
+       * devinfo->max_cs_threads stores number of threads per sub-slice;
+       * thus we need to multiply by that number by subslices to get
+       * the actual maximum number of threads; the -1 is because the HW
+       * has a bias of 1 (would not make sense to say the maximum number
+       * of threads is 0).
+       */
+      const uint32_t subslices = MAX2(/*brw->screen->subslice_total*/ 1, 1);
+      const unsigned int max_cs_threads =
+         batch->blorp->compiler->devinfo->max_cs_threads;
+      vfe.MaximumNumberofThreads = max_cs_threads * subslices - 1;
+      vfe.NumberofURBEntries = GFX_VER >= 8 ? 2 : 0;
+#if GFX_VER < 11
+      vfe.ResetGatewayTimer =
+         Resettingrelativetimerandlatchingtheglobaltimestamp;
+#endif
+#if GFX_VER < 9
+      vfe.BypassGatewayControl = BypassingOpenGatewayCloseGatewayprotocol;
+#endif
+#if GFX_VER == 7
+      vfe.GPGPUMode = 1;
+#endif
+
+      /* We are uploading duplicated copies of push constant uniforms for each
+       * thread. Although the local id data needs to vary per thread, it won't
+       * change for other uniform data. Unfortunately this duplication is
+       * required for gfx7. As of Haswell, this duplication can be avoided,
+       * but this older mechanism with duplicated data continues to work.
+       *
+       * FINISHME: As of Haswell, we could make use of the
+       * INTERFACE_DESCRIPTOR_DATA "Cross-Thread Constant Data Read Length"
+       * field to only store one copy of uniform data.
+       *
+       * FINISHME: Broadwell adds a new alternative "Indirect Payload Storage"
+       * which is described in the GPGPU_WALKER command and in the Broadwell
+       * PRM Volume 7: 3D Media GPGPU, under Media GPGPU Pipeline => Mode of
+       * Operations => GPGPU Mode => Indirect Payload Storage.
+       *
+       * Note: The constant data is built in brw_upload_cs_push_constants
+       * below.
+       */
+      vfe.URBEntryAllocationSize = GFX_VER >= 8 ? 2 : 0;
+
+      const uint32_t vfe_curbe_allocation =
+         ALIGN(cs_prog_data->push.per_thread.regs * dispatch.threads +
+               cs_prog_data->push.cross_thread.regs, 2);
+      vfe.CURBEAllocationSize = vfe_curbe_allocation;
+   }
+
+   uint32_t push_const_offset;
+   unsigned push_const_size;
+   blorp_get_compute_push_const(batch, params, dispatch.threads,
+                                &push_const_offset, &push_const_size);
+
+   blorp_emit(batch, GENX(MEDIA_CURBE_LOAD), curbe) {
+      curbe.CURBETotalDataLength = ALIGN(push_const_size, 64);
+      curbe.CURBEDataStartAddress = push_const_offset;
+   }
+
+   uint32_t surfaces_offset = 0;
+   blorp_alloc_surface_states(batch, params, &surfaces_offset);
+
+   uint32_t samplers_offset =
+      params->src.enabled ? blorp_emit_sampler_state(batch) : 0;
+
+#if GFX_VERx10 < 125
+   struct GENX(INTERFACE_DESCRIPTOR_DATA) desc = {
+      .KernelStartPointer = params->cs_prog_kernel,
+      .SamplerStatePointer = samplers_offset,
+      .SamplerCount = params->src.enabled ? 1 : 0,
+      .BindingTableEntryCount = params->src.enabled ? 2 : 1,
+      .BindingTablePointer = surfaces_offset,
+      .ConstantURBEntryReadLength = cs_prog_data->push.per_thread.regs,
+      .NumberofThreadsinGPGPUThreadGroup = dispatch.threads,
+      .SharedLocalMemorySize = encode_slm_size(GFX_VER,
+                                               prog_data->total_shared),
+      .BarrierEnable = cs_prog_data->uses_barrier,
+#if GFX_VER >= 8 || GEN_IS_HASWELL
+      .CrossThreadConstantDataReadLength =
+         cs_prog_data->push.cross_thread.regs,
+#endif
+   };
+
+   uint32_t idd_offset;
+   void *state =
+      blorp_alloc_dynamic_state(batch,
+                                GENX(INTERFACE_DESCRIPTOR_DATA_length) * 4,
+                                64, &idd_offset);
+   GENX(INTERFACE_DESCRIPTOR_DATA_pack)(NULL, state, &desc);
+
+   uint32_t size = GENX(INTERFACE_DESCRIPTOR_DATA_length) * sizeof(uint32_t);
+   blorp_emit(batch, GENX(MEDIA_INTERFACE_DESCRIPTOR_LOAD), mid) {
+      mid.InterfaceDescriptorTotalLength        = size;
+      mid.InterfaceDescriptorDataStartAddress   = idd_offset;
+   }
+#endif
+
+   return true;
+}
+
+#endif /* GFX_VERx10 < 125 */
+
+static void
+blorp_exec_compute(struct blorp_batch *batch, const struct blorp_params *params)
+{
+   if (!(batch->flags & BLORP_BATCH_NO_UPDATE_CLEAR_COLOR)) {
+      blorp_update_clear_color(batch, &params->dst, params->fast_clear_op);
+      blorp_update_clear_color(batch, &params->depth, params->hiz_op);
+   }
+
+#if GFX_VER >= 8
+   if (params->hiz_op != ISL_AUX_OP_NONE) {
+      blorp_emit_gfx8_hiz_op(batch, params);
+      return;
+   }
+#endif
+
+   blorp_emit_compute_state(batch, params);
+
+   const struct brw_cs_prog_data *prog_data = params->cs_prog_data;
+
+   const struct brw_cs_dispatch_info dispatch =
+      brw_cs_get_dispatch_info(batch->blorp->compiler->devinfo, prog_data,
+                               NULL);
+
+   uint32_t group_x0 = params->x0 / prog_data->local_size[0];
+   uint32_t group_y0 = params->y0 / prog_data->local_size[1];
+   uint32_t group_z0 = params->dst.z_offset;
+   uint32_t group_x1 = DIV_ROUND_UP(params->x1, prog_data->local_size[0]);
+   uint32_t group_y1 = DIV_ROUND_UP(params->y1, prog_data->local_size[1]);
+   assert(params->num_layers >= 1);
+   uint32_t group_z1 = params->dst.z_offset + params->num_layers;
+
+#if GFX_VERx10 >= 125
+
+   assert(prog_data->push.per_thread.regs == 0);
+   blorp_emit(batch, GENX(COMPUTE_WALKER), cw) {
+      cw.SIMDSize                       = dispatch.simd_size / 16;
+      cw.LocalXMaximum                  = prog_data->local_size[0] - 1;
+      cw.LocalYMaximum                  = prog_data->local_size[1] - 1;
+      cw.LocalZMaximum                  = prog_data->local_size[2] - 1;
+      cw.ThreadGroupIDStartingX         = group_x0;
+      cw.ThreadGroupIDStartingY         = group_y0;
+      cw.ThreadGroupIDStartingZ         = group_z0;
+      cw.ThreadGroupIDXDimension        = group_x1;
+      cw.ThreadGroupIDYDimension        = group_y1;
+      cw.ThreadGroupIDZDimension        = group_z1;
+      cw.ExecutionMask                  = 0xffffffff;
+
+      uint32_t surfaces_offset = 0;
+      blorp_alloc_surface_states(batch, params, &surfaces_offset);
+
+      uint32_t samplers_offset =
+         params->src.enabled ? blorp_emit_sampler_state(batch) : 0;
+
+      uint32_t push_const_offset;
+      unsigned push_const_size;
+      blorp_get_compute_push_const(batch, params, dispatch.threads,
+                                   &push_const_offset, &push_const_size);
+      cw.IndirectDataStartAddress       = push_const_offset;
+      cw.IndirectDataLength             = ALIGN(push_const_size, 64);
+
+      struct GENX(INTERFACE_DESCRIPTOR_DATA) idd = {};
+      {
+         idd.KernelStartPointer = params->cs_prog_kernel;
+         idd.SamplerStatePointer = samplers_offset;
+         idd.SamplerCount = params->src.enabled ? 1 : 0;
+         idd.BindingTableEntryCount = params->src.enabled ? 2 : 1;
+         idd.BindingTablePointer = surfaces_offset;
+         idd.NumberofThreadsinGPGPUThreadGroup = dispatch.threads;
+         idd.SharedLocalMemorySize =
+            encode_slm_size(GFX_VER, prog_data->base.total_shared);
+         idd.NumberOfBarriers = prog_data->uses_barrier;
+      }
+      cw.InterfaceDescriptor = idd;
+   }
+
+#else /* GFX_VERx10 >= 125 */
+
+   blorp_emit(batch, GENX(GPGPU_WALKER), ggw) {
+      ggw.SIMDSize                     = dispatch.simd_size / 16;
+      ggw.ThreadDepthCounterMaximum    = 0;
+      ggw.ThreadHeightCounterMaximum   = 0;
+      ggw.ThreadWidthCounterMaximum    = dispatch.threads - 1;
+      ggw.ThreadGroupIDStartingX       = group_x0;
+      ggw.ThreadGroupIDStartingY       = group_y0;
+#if GFX_VER >= 8
+      ggw.ThreadGroupIDStartingResumeZ = group_z0;
+#else
+      ggw.ThreadGroupIDStartingZ       = group_z0;
+#endif
+      ggw.ThreadGroupIDXDimension      = group_x1;
+      ggw.ThreadGroupIDYDimension      = group_y1;
+      ggw.ThreadGroupIDZDimension      = group_z1;
+      ggw.RightExecutionMask           = dispatch.right_mask;
+      ggw.BottomExecutionMask          = 0xffffffff;
+   }
+
+#endif /* GFX_VERx10 >= 125 */
+
+}
+
+#else /* GFX_VER >= 7 */
+
+static void
+blorp_exec_compute(struct blorp_batch *batch, const struct blorp_params *params)
+{
+   unreachable("Compute blorp is not supported on SNB and earlier");
+}
+
+#endif /* GFX_VER >= 7 */
+
+/**
+ * \brief Execute a blit or render pass operation.
+ *
+ * To execute the operation, this function manually constructs and emits a
+ * batch to draw a rectangle primitive. The batchbuffer is flushed before
+ * constructing and after emitting the batch.
+ *
+ * This function alters no GL state.
+ */
+static void
+blorp_exec(struct blorp_batch *batch, const struct blorp_params *params)
+{
+   if (params->cs_prog_data)
+      blorp_exec_compute(batch, params);
+   else
+      blorp_exec_3d(batch, params);
 }
 
 #endif /* BLORP_GENX_EXEC_H */
