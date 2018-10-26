@@ -40,19 +40,21 @@ struct brw_blorp_const_color_prog_key
    bool compute_program;
    bool use_simd16_replicated_data;
    bool clear_rgb_as_red;
+   uint8_t local_y;
 };
 
 static bool
-blorp_params_get_clear_kernel(struct blorp_context *blorp,
-                              struct blorp_params *params,
-                              bool use_replicated_data,
-                              bool clear_rgb_as_red)
+blorp_params_get_clear_kernel_fs(struct blorp_context *blorp,
+                                 struct blorp_params *params,
+                                 bool use_replicated_data,
+                                 bool clear_rgb_as_red)
 {
    const struct brw_blorp_const_color_prog_key blorp_key = {
       .shader_type = BLORP_SHADER_TYPE_CLEAR,
       .compute_program = false,
       .use_simd16_replicated_data = use_replicated_data,
       .clear_rgb_as_red = clear_rgb_as_red,
+      .local_y = 0,
    };
 
    if (blorp->lookup_shader(blorp, &blorp_key, sizeof(blorp_key),
@@ -112,6 +114,154 @@ blorp_params_get_clear_kernel(struct blorp_context *blorp,
 
    ralloc_free(mem_ctx);
    return result;
+}
+
+static nir_ssa_def *
+expand_to_vec4(nir_builder *b, nir_ssa_def *value)
+{
+   if (value->num_components == 4)
+      return value;
+
+   unsigned swiz[4];
+   for (unsigned i = 0; i < 4; i++)
+      swiz[i] = i < value->num_components ? i : 0;
+   return nir_swizzle(b, value, swiz, 4, false);
+}
+
+static bool
+blorp_params_get_clear_kernel_cs(struct blorp_context *blorp,
+                                 struct blorp_params *params,
+                                 bool use_replicated_data,
+                                 bool clear_rgb_as_red)
+{
+   const struct brw_blorp_const_color_prog_key blorp_key = {
+      .shader_type = BLORP_SHADER_TYPE_CLEAR,
+      .compute_program = true,
+      .use_simd16_replicated_data = use_replicated_data,
+      .clear_rgb_as_red = clear_rgb_as_red,
+      .local_y = blorp_get_cs_local_y(params),
+   };
+
+   if (blorp->lookup_shader(blorp, &blorp_key, sizeof(blorp_key),
+                            &params->cs_prog_kernel, &params->cs_prog_data))
+      return true;
+
+   void *mem_ctx = ralloc_context(NULL);
+
+   nir_builder b;
+   nir_builder_init_simple_shader(&b, mem_ctx, MESA_SHADER_COMPUTE, NULL);
+   b.shader->info.name = ralloc_strdup(b.shader, "BLORP-gpgpu-clear");
+   assert(blorp_key.local_y != 0 && (16 % blorp_key.local_y == 0));
+   b.shader->info.cs.local_size[0] = 16 / blorp_key.local_y;
+   b.shader->info.cs.local_size[1] = blorp_key.local_y;
+   b.shader->info.cs.local_size[2] = 1;
+
+   nir_variable *global_inv_id =
+      nir_variable_create(b.shader, nir_var_system_value,
+                          glsl_vec4_type(),
+                          "gl_GlobalInvocationID");
+   global_inv_id->data.location = SYSTEM_VALUE_GLOBAL_INVOCATION_ID;
+   nir_ssa_def *dst_pos = nir_load_var(&b, global_inv_id);
+   dst_pos = nir_vec3(&b, nir_channel(&b, dst_pos, 0),
+                      nir_channel(&b, dst_pos, 1),
+                      nir_channel(&b, dst_pos, 2));
+
+   nir_variable *v_color =
+      BLORP_CREATE_NIR_INPUT(b.shader, clear_color, glsl_vec4_type());
+   nir_ssa_def *color = nir_load_var(&b, v_color);
+
+   nir_variable *v_discard_rect =
+      BLORP_CREATE_NIR_INPUT(b.shader, discard_rect, glsl_vec4_type());
+   nir_ssa_def *discard_rect = nir_load_var(&b, v_discard_rect);
+
+   nir_ssa_def *dst_x0 = nir_channel(&b, discard_rect, 0);
+   nir_ssa_def *dst_x1 = nir_channel(&b, discard_rect, 1);
+   nir_ssa_def *dst_y0 = nir_channel(&b, discard_rect, 2);
+   nir_ssa_def *dst_y1 = nir_channel(&b, discard_rect, 3);
+
+   nir_ssa_def *c0, *c1, *c2, *c3;
+
+   c0 = nir_uge(&b, nir_channel(&b, dst_pos, 0), dst_x0);
+   c1 = nir_ult(&b, nir_channel(&b, dst_pos, 0), dst_x1);
+   c2 = nir_uge(&b, nir_channel(&b, dst_pos, 1), dst_y0);
+   c3 = nir_ult(&b, nir_channel(&b, dst_pos, 1), dst_y1);
+
+   nir_ssa_def *in_bounds =
+      nir_iand(&b, nir_iand(&b, c0, c1), nir_iand(&b, c2, c3));
+
+   if (clear_rgb_as_red) {
+      unreachable("todo!");
+      nir_variable *frag_coord =
+         nir_variable_create(b.shader, nir_var_shader_in,
+                             glsl_vec4_type(), "gl_FragCoord");
+      frag_coord->data.location = VARYING_SLOT_POS;
+      frag_coord->data.origin_upper_left = true;
+
+      nir_ssa_def *pos = nir_f2i32(&b, nir_load_var(&b, frag_coord));
+      nir_ssa_def *comp = nir_umod(&b, nir_channel(&b, pos, 0),
+                                       nir_imm_int(&b, 3));
+      nir_ssa_def *color_component =
+         nir_bcsel(&b, nir_ieq(&b, comp, nir_imm_int(&b, 0)),
+                       nir_channel(&b, color, 0),
+                       nir_bcsel(&b, nir_ieq(&b, comp, nir_imm_int(&b, 1)),
+                                     nir_channel(&b, color, 1),
+                                     nir_channel(&b, color, 2)));
+
+      nir_ssa_def *u = nir_ssa_undef(&b, 1, 32);
+      color = nir_vec4(&b, color_component, u, u, u);
+   }
+
+   nir_if *if_stmt = nir_if_create(b.shader);
+   if_stmt->condition = nir_src_for_ssa(in_bounds);
+   nir_cf_node_insert(b.cursor, &if_stmt->cf_node);
+
+   b.cursor = nir_after_cf_list(&if_stmt->then_list);
+
+   nir_intrinsic_instr *store =
+      nir_intrinsic_instr_create(b.shader, nir_intrinsic_image_store);
+   store->src[0] = nir_src_for_ssa(nir_imm_int(&b, 0));
+   store->src[1] = nir_src_for_ssa(expand_to_vec4(&b, dst_pos));
+   store->src[2] = nir_src_for_ssa(nir_imm_int(&b, 0));
+   store->src[3] = nir_src_for_ssa(expand_to_vec4(&b, color));
+   nir_intrinsic_set_image_dim(store, GLSL_SAMPLER_DIM_3D);
+   nir_intrinsic_set_image_array(store, false);
+   nir_intrinsic_set_access(store, ACCESS_NON_READABLE);
+   nir_intrinsic_set_format(store, 0);
+   store->num_components = 4;
+   nir_builder_instr_insert(&b, &store->instr);
+
+   struct brw_cs_prog_key cs_key;
+   brw_blorp_init_cs_prog_key(&cs_key);
+
+   struct brw_cs_prog_data prog_data;
+   const unsigned *program =
+      blorp_compile_cs(blorp, mem_ctx, b.shader, &cs_key, &prog_data);
+
+   bool result =
+      blorp->upload_shader(blorp, &blorp_key, sizeof(blorp_key),
+                           program, prog_data.base.program_size,
+                           &prog_data.base, sizeof(prog_data),
+                           &params->cs_prog_kernel, &params->cs_prog_data);
+
+   ralloc_free(mem_ctx);
+   return result;
+}
+
+static bool
+blorp_params_get_clear_kernel(struct blorp_batch *batch,
+                              struct blorp_params *params,
+                              bool use_replicated_data,
+                              bool clear_rgb_as_red)
+{
+   if (params->compute_program) {
+      return blorp_params_get_clear_kernel_cs(batch->blorp, params,
+                                              use_replicated_data,
+                                              clear_rgb_as_red);
+   } else {
+      return blorp_params_get_clear_kernel_fs(batch->blorp, params,
+                                              use_replicated_data,
+                                              clear_rgb_as_red);
+   }
 }
 
 struct layer_offset_vs_key {
@@ -352,7 +502,7 @@ blorp_fast_clear(struct blorp_batch *batch,
    get_fast_clear_rect(batch->blorp->isl_dev, surf->aux_surf,
                        &params.x0, &params.y0, &params.x1, &params.y1);
 
-   if (!blorp_params_get_clear_kernel(batch->blorp, &params, true, false))
+   if (!blorp_params_get_clear_kernel(batch, &params, true, false))
       return;
 
    brw_blorp_surface_info_init(batch->blorp, &params.dst, surf, level,
@@ -383,6 +533,15 @@ swizzle_color_value(union isl_color_value src, struct isl_swizzle swizzle)
    return dst;
 }
 
+bool
+blorp_clear_supports_compute(enum isl_aux_usage aux_usage)
+{
+   return
+      aux_usage == ISL_AUX_USAGE_CCS_D ||
+      aux_usage == ISL_AUX_USAGE_CCS_E ||
+      aux_usage == ISL_AUX_USAGE_NONE;
+}
+
 void
 blorp_clear(struct blorp_batch *batch,
             const struct blorp_surf *surf,
@@ -390,10 +549,13 @@ blorp_clear(struct blorp_batch *batch,
             uint32_t level, uint32_t start_layer, uint32_t num_layers,
             uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1,
             union isl_color_value clear_color,
-            const bool color_write_disable[4])
+            const bool color_write_disable[4], bool compute)
 {
    struct blorp_params params;
    blorp_params_init(&params);
+
+   assert(!compute || blorp_clear_supports_compute(surf->aux_usage));
+   params.compute_program = compute;
 
    /* Manually apply the clear destination swizzle.  This way swizzled clears
     * will work for swizzles which we can't normally use for rendering and it
@@ -454,23 +616,36 @@ blorp_clear(struct blorp_batch *batch,
       }
    }
 
-   if (!blorp_params_get_clear_kernel(batch->blorp, &params,
+   if (!blorp_params_get_clear_kernel(batch, &params,
                                       use_simd16_replicated_data,
                                       clear_rgb_as_red))
       return;
 
-   if (!blorp_ensure_sf_program(batch->blorp, &params))
+   if (!params.compute_program &&
+       !blorp_ensure_sf_program(batch->blorp, &params))
       return;
 
    while (num_layers > 0) {
       brw_blorp_surface_info_init(batch->blorp, &params.dst, surf, level,
-                                  start_layer, format, true);
+                                  start_layer, format,
+                                  !params.compute_program);
+      if (params.compute_program) {
+         params.dst.view.usage = ISL_SURF_USAGE_STORAGE_BIT;
+         params.dst.aux_usage = ISL_AUX_USAGE_NONE; // TODO: init aux-buf?
+      }
       params.dst.view.swizzle = swizzle;
 
       params.x0 = x0;
       params.y0 = y0;
       params.x1 = x1;
       params.y1 = y1;
+
+      if (params.compute_program) {
+         params.wm_inputs.discard_rect.x0 = x0;
+         params.wm_inputs.discard_rect.y0 = y0;
+         params.wm_inputs.discard_rect.x1 = x1;
+         params.wm_inputs.discard_rect.y1 = y1;
+      }
 
       if (params.dst.tile_x_sa || params.dst.tile_y_sa) {
          assert(params.dst.surf.samples == 1);
@@ -590,7 +765,7 @@ blorp_clear_depth_stencil(struct blorp_batch *batch,
        * we disable statistics in 3DSTATE_WM.  Give it the usual clear shader
        * to work around the issue.
        */
-      if (!blorp_params_get_clear_kernel(batch->blorp, &params, false, false))
+      if (!blorp_params_get_clear_kernel(batch, &params, false, false))
          return;
    }
 
@@ -830,7 +1005,7 @@ blorp_clear_attachments(struct blorp_batch *batch,
        * is tiled or not, we have to assume it may be linear.  This means no
        * SIMD16_REPDATA for us. :-(
        */
-      if (!blorp_params_get_clear_kernel(batch->blorp, &params, false, false))
+      if (!blorp_params_get_clear_kernel(batch, &params, false, false))
          return;
    }
 
@@ -915,7 +1090,7 @@ blorp_ccs_resolve(struct blorp_batch *batch,
     * color" message.
     */
 
-   if (!blorp_params_get_clear_kernel(batch->blorp, &params, true, false))
+   if (!blorp_params_get_clear_kernel(batch, &params, true, false))
       return;
 
    batch->blorp->exec(batch, &params);
@@ -1193,7 +1368,7 @@ blorp_ccs_ambiguate(struct blorp_batch *batch,
    memset(&params.wm_inputs.clear_color, 0,
           sizeof(params.wm_inputs.clear_color));
 
-   if (!blorp_params_get_clear_kernel(batch->blorp, &params, true, false))
+   if (!blorp_params_get_clear_kernel(batch, &params, true, false))
       return;
 
    batch->blorp->exec(batch, &params);

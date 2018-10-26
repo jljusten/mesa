@@ -788,7 +788,7 @@ void anv_CmdFillBuffer(
 
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
                   0, 0, 1, 0, 0, MAX_SURFACE_DIM, MAX_SURFACE_DIM,
-                  color, NULL);
+                  color, NULL, false);
       fillSize -= max_fill_size;
       dstOffset += max_fill_size;
    }
@@ -804,8 +804,7 @@ void anv_CmdFillBuffer(
                                     &surf, &isl_surf);
 
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
-                  0, 0, 1, 0, 0, MAX_SURFACE_DIM, height,
-                  color, NULL);
+                  0, 0, 1, 0, 0, MAX_SURFACE_DIM, height, color, NULL, false);
       fillSize -= rect_fill_size;
       dstOffset += rect_fill_size;
    }
@@ -819,8 +818,7 @@ void anv_CmdFillBuffer(
                                     &surf, &isl_surf);
 
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
-                  0, 0, 1, 0, 0, width, 1,
-                  color, NULL);
+                  0, 0, 1, 0, 0, width, 1, color, NULL, false);
    }
 
    blorp_batch_finish(&batch);
@@ -880,7 +878,7 @@ void anv_CmdClearColorImage(
                      src_format.isl_format, src_format.swizzle,
                      level, base_layer, layer_count,
                      0, 0, level_width, level_height,
-                     vk_to_isl_color(*pColor), color_write_disable);
+                     vk_to_isl_color(*pColor), color_write_disable, false);
       }
    }
 
@@ -1494,7 +1492,7 @@ anv_image_clear_color(struct anv_cmd_buffer *cmd_buffer,
                area.offset.x, area.offset.y,
                area.offset.x + area.extent.width,
                area.offset.y + area.extent.height,
-               clear_color, NULL);
+               clear_color, NULL, false);
 
    blorp_batch_finish(&batch);
 }
