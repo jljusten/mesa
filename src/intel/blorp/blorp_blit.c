@@ -65,6 +65,9 @@ struct brw_blorp_blit_vars {
 
    /* gl_FragColor */
    nir_variable *color_out;
+
+   /* gl_GlobalInvocationID */
+   nir_variable *global_inv_id;
 };
 
 static void
@@ -92,6 +95,11 @@ brw_blorp_blit_vars_init(nir_builder *b, struct brw_blorp_blit_vars *v,
    v->color_out = nir_variable_create(b->shader, nir_var_shader_out,
                                       glsl_vec4_type(), "gl_FragColor");
    v->color_out->data.location = FRAG_RESULT_COLOR;
+
+   v->global_inv_id = nir_variable_create(b->shader, nir_var_system_value,
+                                          glsl_vec4_type(),
+                                          "gl_GlobalInvocationID");
+   v->global_inv_id->data.location = SYSTEM_VALUE_GLOBAL_INVOCATION_ID;
 }
 
 static nir_ssa_def *
@@ -112,6 +120,33 @@ blorp_blit_get_frag_coords(nir_builder *b,
    if (key->need_dst_offset)
       coord = nir_isub(b, coord, nir_load_var(b, v->v_dst_offset));
 
+   if (key->persample_msaa_dispatch) {
+      return nir_vec3(b, nir_channel(b, coord, 0), nir_channel(b, coord, 1),
+                      nir_load_sample_id(b));
+   } else {
+      return nir_vec2(b, nir_channel(b, coord, 0), nir_channel(b, coord, 1));
+   }
+}
+
+static nir_ssa_def *
+blorp_blit_get_cs_dst_coords(nir_builder *b,
+                             const struct brw_blorp_blit_prog_key *key,
+                             struct brw_blorp_blit_vars *v)
+{
+   nir_ssa_def *coord = nir_load_var(b, v->global_inv_id);
+
+   /* Account for destination surface intratile offset
+    *
+    * Transformation parameters giving translation from destination to source
+    * coordinates don't take into account possible intra-tile destination
+    * offset.  Therefore it has to be first subtracted from the incoming
+    * coordinates.  Vertices are set up based on coordinates containing the
+    * intra-tile offset.
+    */
+   if (key->need_dst_offset)
+      coord = nir_isub(b, coord, nir_load_var(b, v->v_dst_offset));
+
+   assert(!key->persample_msaa_dispatch);
    if (key->persample_msaa_dispatch) {
       return nir_vec3(b, nir_channel(b, coord, 0), nir_channel(b, coord, 1),
                       nir_load_sample_id(b));
@@ -185,7 +220,7 @@ blorp_create_nir_tex_instr(nir_builder *b, struct brw_blorp_blit_vars *v,
     */
    assert(pos->num_components >= 2);
    pos = nir_vec3(b, nir_channel(b, pos, 0), nir_channel(b, pos, 1),
-                     nir_load_var(b, v->v_src_z));
+                  nir_load_var(b, v->v_src_z)/*nir_imm_int(b, 0)*/);
 
    tex->src[0].src_type = nir_tex_src_coord;
    tex->src[0].src = nir_src_for_ssa(pos);
@@ -1023,6 +1058,18 @@ convert_color(struct nir_builder *b, nir_ssa_def *color,
    return nir_vec(b, out_comps, 4);
 }
 
+static nir_ssa_def *
+expand_to_vec4(nir_builder *b, nir_ssa_def *value)
+{
+   if (value->num_components == 4)
+      return value;
+
+   unsigned swiz[4];
+   for (unsigned i = 0; i < 4; i++)
+      swiz[i] = i < value->num_components ? i : 0;
+   return nir_swizzle(b, value, swiz, 4, false);
+}
+
 /**
  * Generator for WM programs used in BLORP blits.
  *
@@ -1163,7 +1210,8 @@ convert_color(struct nir_builder *b, nir_ssa_def *color,
  * of samples).
  */
 static nir_shader *
-brw_blorp_build_nir_shader(struct blorp_context *blorp, void *mem_ctx,
+brw_blorp_build_nir_shader(struct blorp_context *blorp,
+                           struct blorp_batch *batch, void *mem_ctx,
                            const struct brw_blorp_blit_prog_key *key)
 {
    const struct gen_device_info *devinfo = blorp->isl_dev->info;
@@ -1198,12 +1246,16 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp, void *mem_ctx,
           (key->dst_samples <= 1));
 
    nir_builder b;
-   nir_builder_init_simple_shader(&b, mem_ctx, MESA_SHADER_FRAGMENT, NULL);
+   gl_shader_stage stage =
+      key->compute_program ? MESA_SHADER_COMPUTE : MESA_SHADER_FRAGMENT;
+   nir_builder_init_simple_shader(&b, mem_ctx, stage, NULL);
 
    struct brw_blorp_blit_vars v;
    brw_blorp_blit_vars_init(&b, &v, key);
 
-   dst_pos = blorp_blit_get_frag_coords(&b, key, &v);
+   dst_pos = key->compute_program ?
+      blorp_blit_get_cs_dst_coords(&b, key, &v) :
+      blorp_blit_get_frag_coords(&b, key, &v);
 
    /* Render target and texture hardware don't support W tiling until Gen8. */
    const bool rt_tiled_w = false;
@@ -1326,6 +1378,8 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp, void *mem_ctx,
        * memory location.  So we can fetch the texel now.
        */
       if (key->src_samples == 1) {
+         //nir_ssa_def *src_pos = nir_vec2(&b, nir_imm_float(&b, 0.0f),
+         //                                nir_imm_float(&b, 0.0f));
          color = blorp_nir_txf(&b, &v, src_pos, key->texture_data_type);
       } else {
          nir_ssa_def *mcs = NULL;
@@ -1422,15 +1476,31 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp, void *mem_ctx,
       color = nir_vec4(&b, color_component, u, u, u);
    }
 
-   nir_store_var(&b, v.color_out, color, 0xf);
+   if (key->compute_program) {
+      nir_intrinsic_instr *store =
+         nir_intrinsic_instr_create(b.shader, nir_intrinsic_image_store);
+      store->src[0] = nir_src_for_ssa(nir_imm_int(&b, 0));
+      store->src[1] = nir_src_for_ssa(expand_to_vec4(&b, dst_pos));
+      store->src[2] = nir_src_for_ssa(nir_imm_int(&b, 0));
+      store->src[3] = nir_src_for_ssa(expand_to_vec4(&b, color));
+      nir_intrinsic_set_image_dim(store, GLSL_SAMPLER_DIM_2D);
+      nir_intrinsic_set_image_array(store, false);
+      nir_intrinsic_set_access(store, ACCESS_NON_READABLE);
+      nir_intrinsic_set_format(store, 0);
+      store->num_components = 4;
+      nir_builder_instr_insert(&b, &store->instr);
+   } else {
+      nir_store_var(&b, v.color_out, color, 0xf);
+   }
 
    return b.shader;
 }
 
 static bool
-brw_blorp_get_blit_kernel(struct blorp_context *blorp,
-                          struct blorp_params *params,
-                          const struct brw_blorp_blit_prog_key *prog_key)
+brw_blorp_get_blit_kernel_fs(struct blorp_context *blorp,
+                             struct blorp_batch *batch,
+                             struct blorp_params *params,
+                             const struct brw_blorp_blit_prog_key *prog_key)
 {
    if (blorp->lookup_shader(blorp, prog_key, sizeof(*prog_key),
                             &params->wm_prog_kernel, &params->wm_prog_data))
@@ -1441,7 +1511,8 @@ brw_blorp_get_blit_kernel(struct blorp_context *blorp,
    const unsigned *program;
    struct brw_wm_prog_data prog_data;
 
-   nir_shader *nir = brw_blorp_build_nir_shader(blorp, mem_ctx, prog_key);
+   nir_shader *nir = brw_blorp_build_nir_shader(blorp, batch, mem_ctx,
+                                                prog_key);
    nir->info.name = ralloc_strdup(nir, "BLORP-blit");
 
    struct brw_wm_prog_key wm_key;
@@ -1459,6 +1530,49 @@ brw_blorp_get_blit_kernel(struct blorp_context *blorp,
                            program, prog_data.base.program_size,
                            &prog_data.base, sizeof(prog_data),
                            &params->wm_prog_kernel, &params->wm_prog_data);
+
+   ralloc_free(mem_ctx);
+   return result;
+}
+
+static bool
+brw_blorp_get_blit_kernel_cs(struct blorp_context *blorp,
+                             struct blorp_batch *batch,
+                             struct blorp_params *params,
+                             const struct brw_blorp_blit_prog_key *prog_key)
+{
+   if (blorp->lookup_shader(blorp, prog_key, sizeof(*prog_key),
+                            &params->cs_prog_kernel, &params->cs_prog_data))
+      return true;
+
+   void *mem_ctx = ralloc_context(NULL);
+
+   const unsigned *program;
+   struct brw_cs_prog_data prog_data;
+
+   nir_shader *nir = brw_blorp_build_nir_shader(blorp, batch, mem_ctx,
+                                                prog_key);
+   nir->info.name = ralloc_strdup(nir, "BLORP-gpgpu-blit");
+   assert(prog_key->local_y != 0 && (16 % prog_key->local_y == 0));
+   nir->info.cs.local_size[0] = 16 / prog_key->local_y;
+   nir->info.cs.local_size[1] = prog_key->local_y;
+   nir->info.cs.local_size[2] = 1;
+
+   struct brw_cs_prog_key cs_key;
+   brw_blorp_init_cs_prog_key(&cs_key);
+   cs_key.tex.compressed_multisample_layout_mask =
+      prog_key->tex_aux_usage == ISL_AUX_USAGE_MCS;
+   cs_key.tex.msaa_16 = prog_key->tex_samples == 16;
+   //cs_key.multisample_fbo = prog_key->rt_samples > 1;
+   assert(prog_key->rt_samples == 1);
+
+   program = blorp_compile_cs(blorp, mem_ctx, nir, &cs_key, &prog_data);
+
+   bool result =
+      blorp->upload_shader(blorp, prog_key, sizeof(*prog_key),
+                           program, prog_data.base.program_size,
+                           &prog_data.base, sizeof(prog_data),
+                           &params->cs_prog_kernel, &params->cs_prog_data);
 
    ralloc_free(mem_ctx);
    return result;
@@ -2040,11 +2154,21 @@ try_blorp_blit(struct blorp_batch *batch,
    /* For some texture types, we need to pass the layer through the sampler. */
    params->wm_inputs.src_z = params->src.z_offset;
 
-   if (!brw_blorp_get_blit_kernel(batch->blorp, params, wm_prog_key))
-      return 0;
+   if (params->compute_program)
+      wm_prog_key->local_y = blorp_get_cs_local_y(params);
 
-   if (!blorp_ensure_sf_program(batch->blorp, params))
-      return 0;
+   if (params->compute_program) {
+      if (!brw_blorp_get_blit_kernel_cs(batch->blorp, batch, params,
+                                        wm_prog_key))
+         return 0;
+   } else {
+      if (!brw_blorp_get_blit_kernel_fs(batch->blorp, batch, params,
+                                        wm_prog_key))
+         return 0;
+
+      if (!blorp_ensure_sf_program(batch->blorp, params))
+         return 0;
+   }
 
    unsigned result = 0;
    unsigned max_surface_size = get_max_surface_size(devinfo, params);
