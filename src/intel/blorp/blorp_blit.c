@@ -2275,6 +2275,7 @@ blorp_blit(struct blorp_batch *batch,
 
    struct brw_blorp_blit_prog_key wm_prog_key = {
       .shader_type = BLORP_SHADER_TYPE_BLIT,
+      .compute_program = false,
       .filter = filter,
    };
 
@@ -2522,6 +2523,7 @@ blorp_copy(struct blorp_batch *batch,
 
    struct brw_blorp_blit_prog_key wm_prog_key = {
       .shader_type = BLORP_SHADER_TYPE_BLIT,
+      .compute_program = false,
       .filter = BLORP_FILTER_NONE,
       .need_src_offset = src_surf->tile_x_sa || src_surf->tile_y_sa,
       .need_dst_offset = dst_surf->tile_x_sa || dst_surf->tile_y_sa,
