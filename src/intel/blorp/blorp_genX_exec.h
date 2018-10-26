@@ -581,6 +581,14 @@ blorp_emit_sampler_state(struct blorp_batch *batch)
 #endif
    }
 
+   return offset;
+}
+
+static uint32_t
+blorp_emit_sampler_state_ps(struct blorp_batch *batch)
+{
+   uint32_t offset = blorp_emit_sampler_state(batch);
+
 #if GEN_GEN >= 7
    blorp_emit(batch, GENX(3DSTATE_SAMPLER_STATE_POINTERS_PS), ssp) {
       ssp.PointertoPSSamplerState = offset;
@@ -1246,7 +1254,7 @@ blorp_emit_pipeline(struct blorp_batch *batch,
    blorp_emit(batch, GENX(3DSTATE_CONSTANT_PS), ps);
 
    if (params->src.enabled)
-      blorp_emit_sampler_state(batch);
+      blorp_emit_sampler_state_ps(batch);
 
    blorp_emit_3dstate_multisample(batch, params);
 
