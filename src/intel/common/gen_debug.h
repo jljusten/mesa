@@ -83,6 +83,7 @@ extern uint64_t INTEL_DEBUG;
 #define DEBUG_NO_HIZ              (1ull << 39)
 #define DEBUG_COLOR               (1ull << 40)
 #define DEBUG_REEMIT              (1ull << 41)
+#define DEBUG_CS_OPS              (1ull << 42)
 
 /* These flags are not compatible with the disk shader cache */
 #define DEBUG_DISK_CACHE_DISABLE_MASK DEBUG_SHADER_TIME

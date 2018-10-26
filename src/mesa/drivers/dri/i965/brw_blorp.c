@@ -39,6 +39,7 @@
 #include "intel_buffer_objects.h"
 #include "intel_fbo.h"
 #include "common/gen_debug.h"
+#include "util/debug.h"
 
 #define FILE_DEBUG_FLAG DEBUG_BLORP
 
@@ -1281,6 +1282,16 @@ do_single_blorp_clear(struct brw_context *brw, struct gl_framebuffer *fb,
    if (devinfo->gen >= 11)
       can_fast_clear = false;
 
+   const bool compute =
+      unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+               blorp_clear_supports_compute(irb->mt->aux_usage));
+
+   if (compute) {
+      can_fast_clear = false;
+      intel_miptree_prepare_access(brw, irb->mt, level, 1, irb->mt_layer,
+                                   num_layers, ISL_AUX_USAGE_NONE, false);
+   }
+
    if (can_fast_clear) {
       const enum isl_aux_state aux_state =
          intel_miptree_get_aux_state(irb->mt, irb->mt_level, irb->mt_layer);
@@ -1343,8 +1354,9 @@ do_single_blorp_clear(struct brw_context *brw, struct gl_framebuffer *fb,
       enum isl_aux_usage aux_usage =
          intel_miptree_render_aux_usage(brw, irb->mt, isl_format,
                                         false, false);
-      intel_miptree_prepare_render(brw, irb->mt, level, irb->mt_layer,
-                                   num_layers, aux_usage);
+      if (!compute)
+         intel_miptree_prepare_render(brw, irb->mt, level, irb->mt_layer,
+                                      num_layers, aux_usage);
 
       struct isl_surf isl_tmp[2];
       struct blorp_surf surf;
@@ -1359,11 +1371,12 @@ do_single_blorp_clear(struct brw_context *brw, struct gl_framebuffer *fb,
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
                   level, irb->mt_layer, num_layers,
                   x0, y0, x1, y1,
-                  clear_color, color_write_disable, false);
+                  clear_color, color_write_disable, compute);
       blorp_batch_finish(&batch);
 
-      intel_miptree_finish_render(brw, irb->mt, level, irb->mt_layer,
-                                  num_layers, aux_usage);
+      if (!compute)
+         intel_miptree_finish_render(brw, irb->mt, level, irb->mt_layer,
+                                     num_layers, aux_usage);
    }
 
    return;
