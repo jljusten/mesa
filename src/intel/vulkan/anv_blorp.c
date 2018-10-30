@@ -786,9 +786,13 @@ void anv_CmdFillBuffer(
                                     MAX_SURFACE_DIM * bs, isl_format,
                                     &surf, &isl_surf);
 
+      const bool compute =
+         unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+                  blorp_clear_supports_compute(surf.aux_usage));
+
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
                   0, 0, 1, 0, 0, MAX_SURFACE_DIM, MAX_SURFACE_DIM,
-                  color, NULL, false);
+                  color, NULL, compute);
       fillSize -= max_fill_size;
       dstOffset += max_fill_size;
    }
@@ -803,8 +807,13 @@ void anv_CmdFillBuffer(
                                     MAX_SURFACE_DIM * bs, isl_format,
                                     &surf, &isl_surf);
 
+      const bool compute =
+         unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+                  blorp_clear_supports_compute(surf.aux_usage));
+
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
-                  0, 0, 1, 0, 0, MAX_SURFACE_DIM, height, color, NULL, false);
+                  0, 0, 1, 0, 0, MAX_SURFACE_DIM, height, color, NULL,
+                  compute);
       fillSize -= rect_fill_size;
       dstOffset += rect_fill_size;
    }
@@ -817,8 +826,12 @@ void anv_CmdFillBuffer(
                                     width * bs, isl_format,
                                     &surf, &isl_surf);
 
+      const bool compute =
+         unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+                  blorp_clear_supports_compute(surf.aux_usage));
+
       blorp_clear(&batch, &surf, isl_format, ISL_SWIZZLE_IDENTITY,
-                  0, 0, 1, 0, 0, width, 1, color, NULL, false);
+                  0, 0, 1, 0, 0, width, 1, color, NULL, compute);
    }
 
    blorp_batch_finish(&batch);
