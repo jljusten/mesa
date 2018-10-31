@@ -313,13 +313,18 @@ void anv_CmdCopyImage(
                                               dst_surf.aux_usage, dst_level,
                                               dst_base_layer, layer_count);
 
+            const bool compute =
+               unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+                        blorp_copy_supports_compute(&cmd_buffer->device->blorp,
+                                                    &dst_surf));
+
             for (unsigned i = 0; i < layer_count; i++) {
                blorp_copy(&batch, &src_surf, src_level, src_base_layer + i,
                           &dst_surf, dst_level, dst_base_layer + i,
                           srcOffset.x, srcOffset.y,
                           dstOffset.x, dstOffset.y,
                           extent.width, extent.height,
-                          false);
+                          compute);
             }
          }
       } else {
@@ -334,13 +339,18 @@ void anv_CmdCopyImage(
                                            dst_surf.aux_usage, dst_level,
                                            dst_base_layer, layer_count);
 
+         const bool compute =
+            unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+                     blorp_copy_supports_compute(&cmd_buffer->device->blorp,
+                                                 &dst_surf));
+
          for (unsigned i = 0; i < layer_count; i++) {
             blorp_copy(&batch, &src_surf, src_level, src_base_layer + i,
                        &dst_surf, dst_level, dst_base_layer + i,
                        srcOffset.x, srcOffset.y,
                        dstOffset.x, dstOffset.y,
                        extent.width, extent.height,
-                       false);
+                       compute);
          }
       }
    }
@@ -431,12 +441,17 @@ copy_buffer_to_image(struct anv_cmd_buffer *cmd_buffer,
                                            dst->offset.z, extent.depth);
       }
 
+      const bool compute =
+         unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+                  blorp_copy_supports_compute(&cmd_buffer->device->blorp,
+                                              &dst->surf));
+
       for (unsigned z = 0; z < extent.depth; z++) {
          blorp_copy(&batch, &src->surf, src->level, src->offset.z,
                     &dst->surf, dst->level, dst->offset.z,
                     src->offset.x, src->offset.y, dst->offset.x, dst->offset.y,
                     extent.width, extent.height,
-                    false);
+                    compute);
 
          image.offset.z++;
          buffer.surf.addr.offset += buffer_layer_stride;
@@ -667,6 +682,10 @@ void anv_CmdCopyBuffer(
    struct blorp_batch batch;
    blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
 
+   const bool compute =
+      unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+               blorp_buffer_copy_supports_compute(&cmd_buffer->device->blorp));
+
    for (unsigned r = 0; r < regionCount; r++) {
       struct blorp_address src = {
          .buffer = src_buffer->address.bo,
@@ -679,7 +698,7 @@ void anv_CmdCopyBuffer(
          .mocs = anv_mocs_for_bo(cmd_buffer->device, dst_buffer->address.bo),
       };
 
-      blorp_buffer_copy(&batch, src, dst, pRegions[r].size, false);
+      blorp_buffer_copy(&batch, src, dst, pRegions[r].size, compute);
    }
 
    blorp_batch_finish(&batch);
@@ -711,6 +730,10 @@ void anv_CmdUpdateBuffer(
     */
    cmd_buffer->state.pending_pipe_bits |= ANV_PIPE_TEXTURE_CACHE_INVALIDATE_BIT;
 
+   const bool compute =
+      unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+               blorp_buffer_copy_supports_compute(&cmd_buffer->device->blorp));
+
    while (dataSize) {
       const uint32_t copy_size = MIN2(dataSize, max_update_size);
 
@@ -732,7 +755,7 @@ void anv_CmdUpdateBuffer(
          .mocs = anv_mocs_for_bo(cmd_buffer->device, dst_buffer->address.bo),
       };
 
-      blorp_buffer_copy(&batch, src, dst, copy_size, false);
+      blorp_buffer_copy(&batch, src, dst, copy_size, compute);
 
       dataSize -= copy_size;
       dstOffset += copy_size;
@@ -1455,6 +1478,11 @@ anv_image_copy_to_shadow(struct anv_cmd_buffer *cmd_buffer,
       },
    };
 
+   const bool compute =
+      unlikely((INTEL_DEBUG & DEBUG_CS_OPS) &&
+               blorp_copy_supports_compute(&cmd_buffer->device->blorp,
+                                           &surf));
+
    for (uint32_t l = 0; l < level_count; l++) {
       const uint32_t level = base_level + l;
 
@@ -1473,7 +1501,7 @@ anv_image_copy_to_shadow(struct anv_cmd_buffer *cmd_buffer,
          blorp_copy(&batch, &surf, level, layer,
                     &shadow_surf, level, layer,
                     0, 0, 0, 0, extent.width, extent.height,
-                    false);
+                    compute);
       }
    }
 
