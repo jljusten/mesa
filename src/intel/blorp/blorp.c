@@ -274,6 +274,20 @@ blorp_compile_vs(struct blorp_context *blorp, void *mem_ctx,
    return brw_compile_vs(compiler, mem_ctx, &params);
 }
 
+uint8_t
+blorp_get_cs_local_y(struct blorp_params *params)
+{
+   uint32_t height = params->y1 - params->y0;
+   uint32_t or_ys = params->y0 | params->y1;
+   if (height > 32 || (or_ys & 3) == 0) {
+      return 4;
+   } else if ((or_ys & 1) == 0) {
+      return 2;
+   } else {
+      return 1;
+   }
+}
+
 const unsigned *
 blorp_compile_cs(struct blorp_context *blorp, void *mem_ctx,
                  struct nir_shader *nir,
