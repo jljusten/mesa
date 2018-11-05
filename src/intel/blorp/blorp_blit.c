@@ -197,6 +197,32 @@ blorp_nir_discard_if_outside_rect(nir_builder *b, nir_ssa_def *pos,
    nir_builder_instr_insert(b, &discard->instr);
 }
 
+static inline void
+blorp_nir_if_inside_rect(nir_builder *b, nir_ssa_def *pos,
+                         struct brw_blorp_blit_vars *v)
+{
+   nir_ssa_def *c0, *c1, *c2, *c3;
+   nir_ssa_def *discard_rect = nir_load_var(b, v->v_discard_rect);
+   nir_ssa_def *dst_x0 = nir_channel(b, discard_rect, 0);
+   nir_ssa_def *dst_x1 = nir_channel(b, discard_rect, 1);
+   nir_ssa_def *dst_y0 = nir_channel(b, discard_rect, 2);
+   nir_ssa_def *dst_y1 = nir_channel(b, discard_rect, 3);
+
+   c0 = nir_uge(b, nir_channel(b, pos, 0), dst_x0);
+   c1 = nir_ult(b, nir_channel(b, pos, 0), dst_x1);
+   c2 = nir_uge(b, nir_channel(b, pos, 1), dst_y0);
+   c3 = nir_ult(b, nir_channel(b, pos, 1), dst_y1);
+
+   nir_ssa_def *in_bounds =
+      nir_iand(b, nir_iand(b, c0, c1), nir_iand(b, c2, c3));
+
+   nir_if *if_stmt = nir_if_create(b->shader);
+   if_stmt->condition = nir_src_for_ssa(in_bounds);
+   nir_cf_node_insert(b->cursor, &if_stmt->cf_node);
+
+   b->cursor = nir_after_cf_list(&if_stmt->then_list);
+}
+
 static nir_tex_instr *
 blorp_create_nir_tex_instr(nir_builder *b, struct brw_blorp_blit_vars *v,
                            nir_texop op, nir_ssa_def *pos, unsigned num_srcs,
@@ -1215,7 +1241,7 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp,
                            const struct brw_blorp_blit_prog_key *key)
 {
    const struct gen_device_info *devinfo = blorp->isl_dev->info;
-   nir_ssa_def *src_pos, *dst_pos, *color;
+   nir_ssa_def *src_pos, *dst_pos, *store_pos, *color;
 
    /* Sanity checks */
    if (key->dst_tiled_w && key->rt_samples > 1) {
@@ -1257,6 +1283,11 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp,
       blorp_blit_get_cs_dst_coords(&b, key, &v) :
       blorp_blit_get_frag_coords(&b, key, &v);
 
+   store_pos = dst_pos;
+
+   if (key->compute_program && key->need_dst_offset)
+      store_pos = nir_iadd(&b, store_pos, nir_load_var(&b, v.v_dst_offset));
+
    /* Render target and texture hardware don't support W tiling until Gen8. */
    const bool rt_tiled_w = false;
    const bool tex_tiled_w = devinfo->gen >= 8 && key->src_tiled_w;
@@ -1272,7 +1303,12 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp,
     * coordinates are wrong and we have to adjust them to compensate for the
     * difference.
     */
-   if (rt_tiled_w != key->dst_tiled_w ||
+   if (0 && key->compute_program && rt_tiled_w != key->dst_tiled_w) {
+      assert(key->dst_samples == 1);
+      store_pos = blorp_nir_retile_y_to_w(&b, store_pos);
+      //if (key->compute_program && key->need_dst_offset)
+      //   store_pos = nir_iadd(&b, store_pos, nir_load_var(&b, v.v_dst_offset));
+   } else if (rt_tiled_w != key->dst_tiled_w ||
        key->rt_samples != key->dst_samples ||
        key->rt_layout != key->dst_layout) {
       dst_pos = blorp_nir_encode_msaa(&b, dst_pos, key->rt_samples,
@@ -1307,8 +1343,12 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp,
     * If we need to kill pixels that are outside the destination rectangle,
     * now is the time to do it.
     */
-   if (key->use_kill)
-      blorp_nir_discard_if_outside_rect(&b, dst_pos, &v);
+   if (key->use_kill) {
+      if (key->compute_program)
+         blorp_nir_if_inside_rect(&b, dst_pos, &v);
+      else
+         blorp_nir_discard_if_outside_rect(&b, dst_pos, &v);
+   }
 
    src_pos = blorp_blit_apply_transform(&b, nir_i2f32(&b, dst_pos), &v);
    if (dst_pos->num_components == 3) {
@@ -1480,10 +1520,16 @@ brw_blorp_build_nir_shader(struct blorp_context *blorp,
       nir_intrinsic_instr *store =
          nir_intrinsic_instr_create(b.shader, nir_intrinsic_image_store);
       store->src[0] = nir_src_for_ssa(nir_imm_int(&b, 0));
-      store->src[1] = nir_src_for_ssa(expand_to_vec4(&b, dst_pos));
+      assert(store_pos->num_components == 2);
+      nir_ssa_def *dst_z =
+         nir_channel(&b, nir_load_var(&b, v.global_inv_id), 2);
+      store_pos = nir_vec3(&b, nir_channel(&b, store_pos, 0),
+                           nir_channel(&b, store_pos, 1),
+                           dst_z);
+      store->src[1] = nir_src_for_ssa(expand_to_vec4(&b, store_pos));
       store->src[2] = nir_src_for_ssa(nir_imm_int(&b, 0));
       store->src[3] = nir_src_for_ssa(expand_to_vec4(&b, color));
-      nir_intrinsic_set_image_dim(store, GLSL_SAMPLER_DIM_2D);
+      nir_intrinsic_set_image_dim(store, GLSL_SAMPLER_DIM_3D);
       nir_intrinsic_set_image_array(store, false);
       nir_intrinsic_set_access(store, ACCESS_NON_READABLE);
       nir_intrinsic_set_format(store, 0);
@@ -1657,6 +1703,8 @@ blorp_surf_convert_to_single_slice(const struct isl_device *isl_dev,
                            info->view.base_level, layer, z,
                            &info->surf,
                            &byte_offset, &info->tile_x_sa, &info->tile_y_sa);
+   //fprintf(stderr, "byte_offset: 0x%x, (%d, %d)\n", byte_offset,
+   //        info->tile_x_sa, info->tile_y_sa);
    info->addr.offset += byte_offset;
 
    uint32_t tile_x_px, tile_y_px;
@@ -2393,6 +2441,10 @@ blorp_blit(struct blorp_batch *batch,
                                src_layer, src_format, false);
    brw_blorp_surface_info_init(batch->blorp, &params.dst, dst_surf, dst_level,
                                dst_layer, dst_format, true);
+   if (params.compute_program) {
+      params.dst.view.usage = ISL_SURF_USAGE_STORAGE_BIT;
+      params.dst.aux_usage = ISL_AUX_USAGE_NONE; // TODO: init aux-buf?
+   }
 
    params.src.view.swizzle = src_swizzle;
    params.dst.view.swizzle = dst_swizzle;
@@ -2659,7 +2711,11 @@ blorp_copy(struct blorp_batch *batch,
    brw_blorp_surface_info_init(batch->blorp, &params.src, src_surf, src_level,
                                src_layer, ISL_FORMAT_UNSUPPORTED, false);
    brw_blorp_surface_info_init(batch->blorp, &params.dst, dst_surf, dst_level,
-                               dst_layer, ISL_FORMAT_UNSUPPORTED, true);
+                               dst_layer, ISL_FORMAT_UNSUPPORTED, !compute);
+   if (params.compute_program) {
+      params.dst.view.usage = ISL_SURF_USAGE_STORAGE_BIT;
+      params.dst.aux_usage = ISL_AUX_USAGE_NONE; // TODO: init aux-buf?
+   }
 
    struct brw_blorp_blit_prog_key wm_prog_key = {
       .shader_type = BLORP_SHADER_TYPE_BLIT,

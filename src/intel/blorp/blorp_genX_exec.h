@@ -2041,7 +2041,7 @@ blorp_exec_compute(struct blorp_batch *batch, const struct blorp_params *params)
    uint32_t group_z0 = params->dst.z_offset;
    uint32_t group_x1 = DIV_ROUND_UP(params->x1, prog_data->local_size[0]);
    uint32_t group_y1 = DIV_ROUND_UP(params->y1, prog_data->local_size[1]);
-   uint32_t group_z1 = params->dst.z_offset + params->num_layers;
+   uint32_t group_z1 = params->dst.z_offset + 1;
 
    blorp_emit(batch, GENX(GPGPU_WALKER), ggw) {
       ggw.SIMDSize                     = prog_data->simd_size / 16;
