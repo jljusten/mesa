@@ -228,6 +228,21 @@ emit_lrr(struct brw_context *brw, uint32_t dst, uint32_t src)
 }
 #endif
 
+static void
+emit_sdi(struct brw_context *brw, struct brw_address addr, uint64_t imm)
+{
+   brw_batch_emit(brw, GENX(MI_STORE_DATA_IMM), sdi) {
+      sdi.Address                       = addr;
+      sdi.ImmediateData                 = imm;
+   }
+}
+
+static void
+emit_cmd_count(struct brw_context *brw)
+{
+   emit_sdi(brw, rw_32_bo(brw->cmd_count_bo, 0), brw->next_cmd_num++);
+}
+
 /**
  * Polygon stipple packet
  */
@@ -4677,6 +4692,8 @@ genX(emit_gpgpu_walker)(struct brw_context *brw)
       ggw.BottomExecutionMask          = 0xffffffff;
    }
 
+   emit_cmd_count(brw);
+
    brw_batch_emit(brw, GENX(MEDIA_STATE_FLUSH), msf);
 }
 
@@ -6075,4 +6092,6 @@ genX(init_atoms)(struct brw_context *brw)
    brw->vtbl.emit_mi_report_perf_count = genX(emit_mi_report_perf_count);
    brw->vtbl.emit_compute_walker = genX(emit_gpgpu_walker);
 #endif
+
+   brw->vtbl.emit_cmd_count = emit_cmd_count;
 }

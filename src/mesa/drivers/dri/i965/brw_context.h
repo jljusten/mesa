@@ -754,6 +754,8 @@ struct brw_context
                                         uint32_t report_id);
 
       void (*emit_compute_walker)(struct brw_context *brw);
+
+      void (*emit_cmd_count)(struct brw_context *brw);
    } vtbl;
 
    struct brw_bufmgr *bufmgr;

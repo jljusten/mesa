@@ -274,6 +274,8 @@ brw_emit_prim(struct brw_context *brw,
 
    if (brw->always_flush_cache)
       brw_emit_mi_flush(brw);
+
+   brw->vtbl.emit_cmd_count(brw);
 }
 
 
