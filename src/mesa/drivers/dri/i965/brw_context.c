@@ -1184,6 +1184,10 @@ intelDestroyContext(__DRIcontext * driContextPriv)
    if (ctx->swrast_context)
       _swrast_DestroyContext(&brw->ctx);
 
+   uint64_t *cmd_count = brw_bo_map(NULL, brw->cmd_count_bo, MAP_WRITE | MAP_RAW);
+   assert(cmd_count != NULL);
+   fprintf(stderr, "commands: sent: 0x%lx, completed: 0x%lx\n",
+           brw->next_cmd_num - 1, p_atomic_read(cmd_count));
    brw_bo_unreference(brw->cmd_count_bo);
 
    brw_fini_pipe_control(brw);
