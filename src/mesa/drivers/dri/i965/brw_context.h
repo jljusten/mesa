@@ -764,6 +764,10 @@ struct brw_context
    struct brw_bo *workaround_bo;
    uint8_t pipe_controls_since_last_cs_stall;
 
+   /** BO to store a counter of commands */
+   struct brw_bo *cmd_count_bo;
+   uint64_t next_cmd_num;
+
    /**
     * Set of struct brw_bo * that have been rendered to within this batchbuffer
     * and would need flushing before being used from another cache domain that

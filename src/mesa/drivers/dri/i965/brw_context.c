@@ -1066,6 +1066,14 @@ brwCreateContext(gl_api api,
 
    }
 
+   brw->cmd_count_bo = brw_bo_alloc(brw->bufmgr, "cmd_count", 4096,
+                                    BRW_MEMZONE_OTHER);
+   assert(brw->cmd_count_bo);
+   uint64_t *cmd_count = brw_bo_map(NULL, brw->cmd_count_bo, MAP_WRITE | MAP_RAW);
+   assert(cmd_count != NULL);
+   *cmd_count = 0;
+   brw->next_cmd_num = 1;
+
    brw_upload_init(&brw->upload, brw->bufmgr, 65536);
 
    brw_init_state(brw);
@@ -1175,6 +1183,8 @@ intelDestroyContext(__DRIcontext * driContextPriv)
 
    if (ctx->swrast_context)
       _swrast_DestroyContext(&brw->ctx);
+
+   brw_bo_unreference(brw->cmd_count_bo);
 
    brw_fini_pipe_control(brw);
    intel_batchbuffer_free(&brw->batch);
