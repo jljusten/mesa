@@ -97,6 +97,23 @@ __bitset_ffs(const BITSET_WORD *x, int n)
 
 #define BITSET_FFS(x) __bitset_ffs(x, ARRAY_SIZE(x))
 
+/* Get first bit set in a bitset.
+ */
+static inline int
+__bitset_ffc(const BITSET_WORD *x, int n)
+{
+   int i;
+
+   for (i = 0; i < n; i++) {
+      if (~x[i])
+	 return ffs(~x[i]) + BITSET_WORDBITS * i;
+   }
+
+   return 0;
+}
+
+#define BITSET_FFC(x) __bitset_ffc(x, ARRAY_SIZE(x))
+
 static inline unsigned
 __bitset_next_set(unsigned i, BITSET_WORD *tmp,
                   const BITSET_WORD *set, unsigned size)
