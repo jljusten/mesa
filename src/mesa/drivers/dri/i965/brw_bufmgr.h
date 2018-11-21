@@ -150,6 +150,7 @@ struct brw_bo {
 
    int refcount;
    const char *name;
+   uint64_t last_used_by_command;
 
    uint64_t kflags;
 
@@ -193,6 +194,18 @@ struct brw_bo {
     * Boolean of whether this buffer is cache coherent
     */
    bool cache_coherent;
+
+   /**
+    * Array of bo_ttl entries which is indexed by the context handle
+    */
+   struct bo_ttl *ttl;
+};
+
+struct brw_ttl_bo {
+   struct list_head head;
+   struct brw_bo *bo;
+   uint64_t min;
+   uint64_t *current;
 };
 
 #define BO_ALLOC_BUSY       (1<<0)
@@ -262,6 +275,12 @@ brw_bo_reference(struct brw_bo *bo)
  * no references remain.
  */
 void brw_bo_unreference(struct brw_bo *bo);
+
+/**
+ * Updates the command number associated with a bo. The bo will not be freed
+ * until the specified command has been processed.
+ */
+void brw_bo_used_by_command(struct brw_bo *bo, uint64_t command_num);
 
 /* Must match MapBufferRange interface (for convenience) */
 #define MAP_READ        GL_MAP_READ_BIT
@@ -348,6 +367,8 @@ struct brw_bo *brw_bo_gem_create_from_name(struct brw_bufmgr *bufmgr,
                                            const char *name,
                                            unsigned int handle);
 void brw_bufmgr_enable_reuse(struct brw_bufmgr *bufmgr);
+void brw_bufmgr_command_finished(struct brw_bufmgr *bufmgr,
+                                 uint64_t command_num);
 
 int brw_bo_wait(struct brw_bo *bo, int64_t timeout_ns);
 
@@ -368,6 +389,9 @@ struct brw_bo *brw_bo_gem_create_from_prime_tiled(struct brw_bufmgr *bufmgr,
                                                   uint32_t stride);
 
 uint32_t brw_bo_export_gem_handle(struct brw_bo *bo);
+
+uint32_t brw_create_ctx_handle(struct brw_bufmgr *bufmgr);
+void brw_destroy_ctx_handle(struct brw_bufmgr *bufmgr, uint32_t handle);
 
 int brw_reg_read(struct brw_bufmgr *bufmgr, uint32_t offset,
                  uint64_t *result);

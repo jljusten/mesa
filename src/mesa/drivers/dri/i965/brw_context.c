@@ -1053,6 +1053,8 @@ brwCreateContext(gl_api api,
       }
    }
 
+   brw->bo_ctx_handle = brw_create_ctx_handle(brw->bufmgr);
+
    if (brw_init_pipe_control(brw, devinfo)) {
       *dri_ctx_error = __DRI_CTX_ERROR_NO_MEMORY;
       intelDestroyContext(driContextPriv);

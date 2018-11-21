@@ -769,6 +769,7 @@ struct brw_context
    /** BO to store a counter of commands */
    struct brw_bo *cmd_count_bo;
    uint64_t next_cmd_num;
+   uint32_t bo_ctx_handle;
 
    /**
     * Set of struct brw_bo * that have been rendered to within this batchbuffer

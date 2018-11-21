@@ -36,6 +36,7 @@
 #endif
 
 #include <xf86drm.h>
+#include <util/bitset.h>
 #include <util/u_atomic.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -101,6 +102,14 @@ atomic_add_unless(int *v, int add, int unless)
    return c == unless;
 }
 
+static inline void
+atomic_set_max64(uint64_t *v, uint64_t max)
+{
+   uint64_t result, old = p_atomic_read(v);
+   while ((result = p_atomic_cmpxchg(v, old, max)) < max && result != old)
+      old = result;
+}
+
 /**
  * i965 fixed-size bucketing VMA allocator.
  *
@@ -158,6 +167,8 @@ struct brw_bufmgr {
    bool bo_reuse:1;
 
    uint64_t initial_kflags;
+
+   BITSET_DECLARE(handle_bits, 64);
 };
 
 static int bo_set_tiling_internal(struct brw_bo *bo, uint32_t tiling_mode,
@@ -924,6 +935,17 @@ brw_bo_unreference(struct brw_bo *bo)
    }
 }
 
+void
+brw_bo_used_by_command(struct brw_bo *bo, uint64_t command_num)
+{
+   atomic_set_max64(&bo->last_used_by_command, command_num);
+}
+
+void
+brw_bufmgr_command_finished(struct brw_bufmgr *bufmgr, uint64_t command_num)
+{
+}
+
 static void
 bo_wait_with_stall_warning(struct brw_context *brw,
                            struct brw_bo *bo,
@@ -1631,6 +1653,24 @@ brw_destroy_hw_context(struct brw_bufmgr *bufmgr, uint32_t ctx_id)
       fprintf(stderr, "DRM_IOCTL_I915_GEM_CONTEXT_DESTROY failed: %s\n",
               strerror(errno));
    }
+}
+
+uint32_t brw_create_ctx_handle(struct brw_bufmgr *bufmgr)
+{
+   mtx_lock(&bufmgr->lock);
+   uint32_t handle = BITSET_FFC(bufmgr->handle_bits);
+   assert(handle);
+   BITSET_SET(bufmgr->handle_bits, handle);
+   mtx_unlock(&bufmgr->lock);
+   return handle - 1;
+}
+
+void brw_destroy_ctx_handle(struct brw_bufmgr *bufmgr, uint32_t handle)
+{
+   mtx_lock(&bufmgr->lock);
+   assert(BITSET_TEST(bufmgr->handle_bits, handle + 1));
+   BITSET_CLEAR(bufmgr->handle_bits, handle + 1);
+   mtx_unlock(&bufmgr->lock);
 }
 
 int
