@@ -3002,18 +3002,6 @@ iris_emit_sbe(struct iris_batch *batch, const struct iris_context *ice)
 /* ------------------------------------------------------------------- */
 
 /**
- * Set sampler-related program key fields based on the current state.
- */
-static void
-iris_populate_sampler_key(const struct iris_context *ice,
-                          struct brw_sampler_prog_key_data *key)
-{
-   for (int i = 0; i < MAX_SAMPLERS; i++) {
-      key->swizzles[i] = 0x688; /* XYZW */
-   }
-}
-
-/**
  * Populate VS program key fields based on the current state.
  */
 static void
@@ -3022,8 +3010,6 @@ iris_populate_vs_key(const struct iris_context *ice,
                      struct brw_vs_prog_key *key)
 {
    const struct iris_rasterizer_state *cso_rast = ice->state.cso_rast;
-
-   iris_populate_sampler_key(ice, &key->tex);
 
    if (info->clip_distance_array_size == 0 &&
        (info->outputs_written & (VARYING_BIT_POS | VARYING_BIT_CLIP_VERTEX)))
@@ -3037,7 +3023,6 @@ static void
 iris_populate_tcs_key(const struct iris_context *ice,
                       struct brw_tcs_prog_key *key)
 {
-   iris_populate_sampler_key(ice, &key->tex);
 }
 
 /**
@@ -3047,7 +3032,6 @@ static void
 iris_populate_tes_key(const struct iris_context *ice,
                       struct brw_tes_prog_key *key)
 {
-   iris_populate_sampler_key(ice, &key->tex);
 }
 
 /**
@@ -3057,7 +3041,6 @@ static void
 iris_populate_gs_key(const struct iris_context *ice,
                      struct brw_gs_prog_key *key)
 {
-   iris_populate_sampler_key(ice, &key->tex);
 }
 
 /**
@@ -3067,8 +3050,6 @@ static void
 iris_populate_fs_key(const struct iris_context *ice,
                      struct brw_wm_prog_key *key)
 {
-   iris_populate_sampler_key(ice, &key->tex);
-
    /* XXX: dirty flags? */
    const struct pipe_framebuffer_state *fb = &ice->state.framebuffer;
    const struct iris_depth_stencil_alpha_state *zsa = ice->state.cso_zsa;
@@ -3100,7 +3081,6 @@ static void
 iris_populate_cs_key(const struct iris_context *ice,
                      struct brw_cs_prog_key *key)
 {
-   iris_populate_sampler_key(ice, &key->tex);
 }
 
 #if 0
