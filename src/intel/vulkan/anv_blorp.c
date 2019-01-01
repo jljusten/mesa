@@ -445,8 +445,12 @@ void anv_CmdCopyImage2KHR(
    ANV_FROM_HANDLE(anv_image, src_image, pCopyImageInfo->srcImage);
    ANV_FROM_HANDLE(anv_image, dst_image, pCopyImageInfo->dstImage);
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    for (unsigned r = 0; r < pCopyImageInfo->regionCount; r++) {
       copy_image(cmd_buffer, &batch,
@@ -630,8 +634,12 @@ void anv_CmdCopyBufferToImage2KHR(
    ANV_FROM_HANDLE(anv_buffer, src_buffer, pCopyBufferToImageInfo->srcBuffer);
    ANV_FROM_HANDLE(anv_image, dst_image, pCopyBufferToImageInfo->dstImage);
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    for (unsigned r = 0; r < pCopyBufferToImageInfo->regionCount; r++) {
       copy_buffer_to_image(cmd_buffer, &batch, src_buffer, dst_image,
@@ -650,8 +658,12 @@ void anv_CmdCopyImageToBuffer2KHR(
    ANV_FROM_HANDLE(anv_image, src_image, pCopyImageToBufferInfo->srcImage);
    ANV_FROM_HANDLE(anv_buffer, dst_buffer, pCopyImageToBufferInfo->dstBuffer);
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    for (unsigned r = 0; r < pCopyImageToBufferInfo->regionCount; r++) {
       copy_buffer_to_image(cmd_buffer, &batch, dst_buffer, src_image,
@@ -844,12 +856,14 @@ gcd_pow2_u64(uint64_t a, uint64_t b)
 #define MAX_SURFACE_DIM (1ull << 14)
 
 static void
-copy_buffer(struct anv_device *device,
+copy_buffer(struct anv_cmd_buffer *cmd_buffer,
             struct blorp_batch *batch,
             struct anv_buffer *src_buffer,
             struct anv_buffer *dst_buffer,
             const VkBufferCopy2KHR *region)
 {
+   struct anv_device *device = cmd_buffer->device;
+
    struct blorp_address src = {
       .buffer = src_buffer->address.bo,
       .offset = src_buffer->address.offset + region->srcOffset,
@@ -878,11 +892,15 @@ void anv_CmdCopyBuffer2KHR(
    ANV_FROM_HANDLE(anv_buffer, src_buffer, pCopyBufferInfo->srcBuffer);
    ANV_FROM_HANDLE(anv_buffer, dst_buffer, pCopyBufferInfo->dstBuffer);
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    for (unsigned r = 0; r < pCopyBufferInfo->regionCount; r++) {
-      copy_buffer(cmd_buffer->device, &batch, src_buffer, dst_buffer,
+      copy_buffer(cmd_buffer, &batch, src_buffer, dst_buffer,
                   &pCopyBufferInfo->pRegions[r]);
    }
 
@@ -902,8 +920,12 @@ void anv_CmdUpdateBuffer(
    ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
    ANV_FROM_HANDLE(anv_buffer, dst_buffer, dstBuffer);
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    /* We can't quite grab a full block because the state stream needs a
     * little data at the top to build its linked list.
@@ -969,8 +991,12 @@ void anv_CmdFillBuffer(
    struct blorp_surf surf;
    struct isl_surf isl_surf;
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    fillSize = anv_buffer_get_range(dst_buffer, dstOffset, fillSize);
 
@@ -1059,8 +1085,12 @@ void anv_CmdClearColorImage(
 
    static const bool color_write_disable[4] = { false, false, false, false };
 
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
 
    for (unsigned r = 0; r < rangeCount; r++) {
@@ -1554,8 +1584,12 @@ anv_image_copy_to_shadow(struct anv_cmd_buffer *cmd_buffer,
                          uint32_t base_level, uint32_t level_count,
                          uint32_t base_layer, uint32_t layer_count)
 {
+   enum blorp_batch_flags flags =
+      !(cmd_buffer->pool->queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) ?
+      BLORP_BATCH_USE_COMPUTE : 0;
+
    struct blorp_batch batch;
-   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, 0);
+   blorp_batch_init(&cmd_buffer->device->blorp, &batch, cmd_buffer, flags);
 
    /* We don't know who touched the main surface last so flush a bunch of
     * caches to ensure we get good data.
