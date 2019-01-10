@@ -1423,10 +1423,18 @@ void st_init_extensions(struct pipe_screen *screen,
    }
 #endif
 
-   if (screen->get_param(screen, PIPE_CAP_DOUBLES)) {
+   enum pipe_shader_ir preferred_ir = (enum pipe_shader_ir)
+     screen->get_shader_param(screen, PIPE_SHADER_VERTEX,
+			      PIPE_SHADER_CAP_PREFERRED_IR);
+   bool use_nir = preferred_ir == PIPE_SHADER_IR_NIR;
+   int doubles = screen->get_param(screen, PIPE_CAP_DOUBLES);
+   if ((doubles == 1) || (doubles == 2 && use_nir)) {
       extensions->ARB_gpu_shader_fp64 = GL_TRUE;
       extensions->ARB_vertex_attrib_64bit = GL_TRUE;
    }
+
+   if (doubles == 2 && use_nir)
+      extensions->ARB_gpu_shader_int64 = GL_TRUE;
 
    if ((ST_DEBUG & DEBUG_GREMEDY) &&
        screen->get_param(screen, PIPE_CAP_STRING_MARKER))
