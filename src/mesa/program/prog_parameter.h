@@ -185,6 +185,9 @@ _mesa_lookup_parameter_index(const struct gl_program_parameter_list *paramList,
    return -1;
 }
 
+extern bool
+_mesa_gl_datatype_is_64bit(GLenum datatype);
+
 #ifdef __cplusplus
 }
 #endif
