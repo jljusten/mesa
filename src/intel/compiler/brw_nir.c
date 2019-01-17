@@ -263,10 +263,15 @@ brw_nir_lower_vs_inputs(nir_shader *nir,
             switch (intrin->intrinsic) {
             case nir_intrinsic_load_first_vertex:
             case nir_intrinsic_load_base_instance:
-            case nir_intrinsic_load_vertex_id_zero_base:
-            case nir_intrinsic_load_instance_id:
             case nir_intrinsic_load_is_indexed_draw:
             case nir_intrinsic_load_draw_id: {
+               b.cursor = nir_after_instr(&intrin->instr);
+               nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
+                                        nir_src_for_ssa(nir_imm_int(&b, 0)));
+               break;
+            }
+            case nir_intrinsic_load_vertex_id_zero_base:
+            case nir_intrinsic_load_instance_id: {
                b.cursor = nir_after_instr(&intrin->instr);
 
                /* gl_VertexID and friends are stored by the VF as the last
