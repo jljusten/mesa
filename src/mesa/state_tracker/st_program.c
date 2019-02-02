@@ -502,7 +502,8 @@ st_translate_vertex_program(struct st_context *st,
       st->pipe->screen->get_shader_param(st->pipe->screen, PIPE_SHADER_VERTEX,
                                          PIPE_SHADER_CAP_PREFERRED_IR);
 
-   if (preferred_ir == PIPE_SHADER_IR_NIR) {
+   if (preferred_ir == PIPE_SHADER_IR_NIR &&
+       st->ctx->RenderMode == GL_RENDER) {
       nir_shader *nir =
          st_translate_prog_to_nir(st, &stvp->Base, MESA_SHADER_VERTEX);
 
@@ -759,7 +760,8 @@ st_translate_fragment_program(struct st_context *st,
                                          PIPE_SHADER_FRAGMENT,
                                          PIPE_SHADER_CAP_PREFERRED_IR);
 
-   if (preferred_ir == PIPE_SHADER_IR_NIR && !stfp->ati_fs) {
+   if (preferred_ir == PIPE_SHADER_IR_NIR && !stfp->ati_fs &&
+       st->ctx->RenderMode == GL_RENDER) {
       nir_shader *nir =
          st_translate_prog_to_nir(st, &stfp->Base, MESA_SHADER_FRAGMENT);
 
