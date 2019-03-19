@@ -1737,7 +1737,8 @@ isl_drm_modifier_get_default_aux_state(uint64_t modifier)
    if (!mod_info || mod_info->aux_usage == ISL_AUX_USAGE_NONE)
       return ISL_AUX_STATE_AUX_INVALID;
 
-   assert(mod_info->aux_usage == ISL_AUX_USAGE_CCS_E);
+   assert(mod_info->aux_usage == ISL_AUX_USAGE_CCS_E ||
+          mod_info->aux_usage == ISL_AUX_USAGE_MC);
    return mod_info->supports_clear_color ? ISL_AUX_STATE_COMPRESSED_CLEAR :
                                            ISL_AUX_STATE_COMPRESSED_NO_CLEAR;
 }
