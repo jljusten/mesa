@@ -591,6 +591,36 @@ isl_format_supports_ccs_e(const struct gen_device_info *devinfo,
    return format_gen(devinfo) >= format_info[format].ccs_e;
 }
 
+/**
+ * Returns true if the given format can support media compression access.
+ * This function only checks the format.  In order to determine if a surface
+ * supports media compression, several other factors need to be considered
+ * such as tiling and sample count.
+ */
+bool
+isl_format_supports_mc(const struct gen_device_info *devinfo,
+                       enum isl_format format)
+{
+   if (!format_info_exists(format))
+      return false;
+
+   /* For now, we only allow formats whose aux-map format encodings for the media
+    * engine and 3D engine agree.
+    */
+   switch (format) {
+   case ISL_FORMAT_R16G16B16A16_FLOAT:
+   case ISL_FORMAT_B8G8R8A8_UNORM:
+   case ISL_FORMAT_B8G8R8X8_UNORM:
+   case ISL_FORMAT_B8G8R8A8_UNORM_SRGB:
+   case ISL_FORMAT_B8G8R8X8_UNORM_SRGB:
+   case ISL_FORMAT_R8G8B8A8_UNORM:
+   case ISL_FORMAT_R8G8B8A8_UNORM_SRGB:
+      return devinfo->gen >= 12;
+   default:
+      return false;
+   }
+}
+
 bool
 isl_format_supports_multisampling(const struct gen_device_info *devinfo,
                                   enum isl_format format)
