@@ -126,6 +126,8 @@ convert_fast_clear_color(struct iris_context *ice,
 {
    union isl_color_value override_color = color;
    struct pipe_resource *p_res = (void *) res;
+   struct iris_batch *batch = &ice->batches[IRIS_BATCH_RENDER];
+   const struct gen_device_info *devinfo = &batch->screen->devinfo;
 
    const enum pipe_format format = p_res->format;
    const struct util_format_description *desc =
@@ -185,8 +187,36 @@ convert_fast_clear_color(struct iris_context *ice,
          override_color.f32[3] = 1.0f;
    }
 
-   /* Handle linear to SRGB conversion */
-   if (util_format_is_srgb(format)) {
+   /* Handle linear to SRGB conversion.
+    * On GEN == 9:
+    *
+    *  - 1 clear color, pre-encoded to sRGB if needed, stored in the surface
+    *  state.
+    *
+    *  - sampling: if the surface format is of type sRGB UNORM, the clear color
+    *  gets decoded from sRGB to linear.
+    *
+    *  - resolving: we always use a linear version of the surface format, so no
+    *  sRGB encoding/decoding of the clear color happens.
+    *
+    * On GEN > 9:
+    *  - There are 2 clear colors:
+    *    #1 in linear color space, stored in clear color buffer by us;
+    *    #2 in HW native format, encoded to sRGB depending on the surface
+    *    format, stored by the HW also into clear color buffer.
+    *
+    *  - sampling: uses clear color #2, and will sRGB decode the clear color if
+    *  the surface format is of type sRGB UNORM.
+    *
+    *  - resolve: uses clear color #1, which is in linear colorspace, so it
+    *  needs to be converted to sRGB if sRGB was enabled at the time of the
+    *  fast clear operation. For that reason, if res->aux.fast_clear_srgb is
+    *  set, during resolve we don't convert the surface format from sRGB to
+    *  linear. This makes the hardware do the conversion for us while
+    *  resolving.
+    *
+    */
+   if (devinfo->gen <= 10 && res->aux.fast_clear_srgb) {
       for (int i = 0; i < 3; i++) {
          override_color.f32[i] =
             util_format_linear_to_srgb_float(override_color.f32[i]);
@@ -210,6 +240,7 @@ fast_clear_color(struct iris_context *ice,
    const enum isl_aux_state aux_state =
       iris_resource_get_aux_state(res, level, box->z);
 
+   res->aux.fast_clear_srgb = isl_format_is_srgb(format);
    color = convert_fast_clear_color(ice, res, color);
 
    bool color_changed = !!memcmp(&res->aux.clear_color, &color,

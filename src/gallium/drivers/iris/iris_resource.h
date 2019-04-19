@@ -98,6 +98,9 @@ struct iris_resource {
       /** Offset into bo where the clear color can be found.  */
       uint64_t clear_color_offset;
 
+      /** Track whether we need sRGB conversion of the clear color */
+      bool fast_clear_srgb;
+
       /**
        * \brief The type of auxiliary compression used by this resource.
        *

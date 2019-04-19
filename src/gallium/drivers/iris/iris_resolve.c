@@ -442,6 +442,9 @@ iris_resolve_color(struct iris_context *ice,
                    unsigned level, unsigned layer,
                    enum isl_aux_op resolve_op)
 {
+   struct iris_screen *screen = (void *) ice->ctx.screen;
+   struct gen_device_info *devinfo = &screen->devinfo;
+
    //DBG("%s to mt %p level %u layer %u\n", __FUNCTION__, mt, level, layer);
 
    struct blorp_surf surf;
@@ -466,9 +469,12 @@ iris_resolve_color(struct iris_context *ice,
 
    struct blorp_batch blorp_batch;
    blorp_batch_init(&ice->blorp, &blorp_batch, batch, 0);
+
+   /* See "Handle linear to SRGB conversion" in iris_clear.c */
+   enum isl_format format = devinfo->gen > 10 && res->aux.fast_clear_srgb ?
+      res->surf.format : isl_format_srgb_to_linear(res->surf.format);
    blorp_ccs_resolve(&blorp_batch, &surf, level, layer, 1,
-                     isl_format_srgb_to_linear(res->surf.format),
-                     resolve_op);
+                     format, resolve_op);
    blorp_batch_finish(&blorp_batch);
 
    /* See comment above */
