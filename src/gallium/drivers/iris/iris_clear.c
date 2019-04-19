@@ -104,8 +104,10 @@ can_fast_clear_color(struct iris_context *ice,
     * during resolves because the resolve operations only know about the
     * resource and not the renderbuffer.
     */
-   if (render_format != format)
+   if (isl_format_srgb_to_linear(render_format) !=
+       isl_format_srgb_to_linear(format)) {
       return false;
+   }
 
    /* XXX: if (irb->mt->supports_fast_clear)
     * see intel_miptree_create_for_dri_image()
