@@ -110,7 +110,11 @@
 #include "iris_genx_macros.h"
 #include "intel/common/gen_guardband.h"
 
-#if GEN_GEN == 8
+#if GEN_GEN >= 12
+/* BUGBUG: PTE set to uncached */
+#define MOCS_PTE (3 << 1)
+#define MOCS_WB (2 << 1)
+#elif GEN_GEN == 8
 #define MOCS_PTE 0x18
 #define MOCS_WB 0x78
 #else
