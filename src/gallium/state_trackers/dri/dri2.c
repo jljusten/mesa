@@ -1152,7 +1152,15 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
       }
       return GL_TRUE;
    case __DRI_IMAGE_ATTRIB_NUM_PLANES:
-      *value = 1;
+      whandle.type = WINSYS_HANDLE_TYPE_KMS;
+      whandle.modifier = DRM_FORMAT_MOD_INVALID;
+      if (image->texture->screen->resource_get_handle(image->texture->screen,
+                                                      NULL, image->texture,
+                                                      &whandle, usage)) {
+         *value = MAX2(1, whandle.planes);
+      } else {
+         *value = 1;
+      }
       return GL_TRUE;
    case __DRI_IMAGE_ATTRIB_MODIFIER_UPPER:
       whandle.type = WINSYS_HANDLE_TYPE_KMS;
