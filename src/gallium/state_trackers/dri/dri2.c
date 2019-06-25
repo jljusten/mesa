@@ -828,27 +828,33 @@ dri2_create_image_from_winsys(__DRIscreen *_screen,
    for (i = num_handles - 1; i >= 0; i--) {
       struct pipe_resource *tex;
 
-      /* TODO: something a lot less ugly */
-      switch (i) {
-      case 0:
+      if (whandle[i].modifier == DRM_FORMAT_MOD_INVALID) {
+         /* TODO: something a lot less ugly */
+         switch (i) {
+         case 0:
+            templ.width0 = width;
+            templ.height0 = height;
+            templ.format = pf;
+            break;
+         case 1:
+            templ.width0 = width / 2;
+            templ.height0 = height / 2;
+            templ.format = (num_handles == 2) ?
+               PIPE_FORMAT_RG88_UNORM :   /* NV12, etc */
+               PIPE_FORMAT_R8_UNORM;      /* I420, etc */
+            break;
+         case 2:
+            templ.width0 = width / 2;
+            templ.height0 = height / 2;
+            templ.format = PIPE_FORMAT_R8_UNORM;
+            break;
+         default:
+            unreachable("too many planes!");
+         }
+      } else {
          templ.width0 = width;
          templ.height0 = height;
          templ.format = pf;
-         break;
-      case 1:
-         templ.width0 = width / 2;
-         templ.height0 = height / 2;
-         templ.format = (num_handles == 2) ?
-               PIPE_FORMAT_RG88_UNORM :   /* NV12, etc */
-               PIPE_FORMAT_R8_UNORM;      /* I420, etc */
-         break;
-      case 2:
-         templ.width0 = width / 2;
-         templ.height0 = height / 2;
-         templ.format = PIPE_FORMAT_R8_UNORM;
-         break;
-      default:
-         unreachable("too many planes!");
       }
 
       tex = pscreen->resource_from_handle(pscreen,
@@ -867,6 +873,7 @@ dri2_create_image_from_winsys(__DRIscreen *_screen,
    img->layer = 0;
    img->use = 0;
    img->loader_private = loaderPrivate;
+   img->planes = whandle[0].planes;
 
    return img;
 }
@@ -930,7 +937,7 @@ dri2_create_image_from_fd(__DRIscreen *_screen,
       expected_num_fds = 2;
       break;
    default:
-      expected_num_fds = 1;
+      expected_num_fds = modifier == DRM_FORMAT_MOD_INVALID ? 1 : num_fds;
       break;
    }
 
@@ -952,6 +959,7 @@ dri2_create_image_from_fd(__DRIscreen *_screen,
       whandles[i].stride = (unsigned)strides[i];
       whandles[i].offset = (unsigned)offsets[i];
       whandles[i].modifier = modifier;
+      whandles[i].plane = i;
    }
 
    if (fourcc == __DRI_IMAGE_FOURCC_YVU420) {
@@ -994,6 +1002,7 @@ dri2_create_image_common(__DRIscreen *_screen,
    __DRIimage *img;
    struct pipe_resource templ;
    unsigned tex_usage;
+   struct winsys_handle whandle;
 
    if (!map)
       return NULL;
@@ -1048,6 +1057,17 @@ dri2_create_image_common(__DRIscreen *_screen,
    img->dri_components = 0;
    img->use = use;
 
+   memset(&whandle, 0, sizeof(whandle));
+   if (screen->can_share_buffer)
+      whandle.type = WINSYS_HANDLE_TYPE_SHARED;
+   else
+      whandle.type = WINSYS_HANDLE_TYPE_KMS;
+   screen->base.screen->resource_get_handle(screen->base.screen, NULL,
+                                            img->texture, &whandle,
+                                            PIPE_HANDLE_USAGE_EXPLICIT_FLUSH);
+   img->planes = MAX2(1, whandle.planes);
+   img->modifier = modifiers ? whandle.modifier : DRM_FORMAT_MOD_INVALID;
+
    img->loader_private = loaderPrivate;
    return img;
 }
@@ -1086,6 +1106,7 @@ dri2_query_image(__DRIimage *image, int attrib, int *value)
       usage = PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE;
 
    memset(&whandle, 0, sizeof(whandle));
+   whandle.plane = image->plane;
 
    switch (attrib) {
    case __DRI_IMAGE_ATTRIB_STRIDE:
@@ -1204,6 +1225,7 @@ dri2_dup_image(__DRIimage *image, void *loaderPrivate)
    /* This should be 0 for sub images, but dup is also used for base images. */
    img->dri_components = image->dri_components;
    img->loader_private = loaderPrivate;
+   img->planes = image->planes;
 
    return img;
 }
@@ -1275,10 +1297,10 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
 {
    __DRIimage *img;
 
-   if (plane != 0)
+   if (plane >= image->planes)
       return NULL;
 
-   if (image->dri_components == 0)
+   if (image->dri_components == 0 && image->modifier == DRM_FORMAT_MOD_INVALID)
       return NULL;
 
    img = dri2_dup_image(image, loaderPrivate);
@@ -1291,6 +1313,7 @@ dri2_from_planar(__DRIimage *image, int plane, void *loaderPrivate)
 
    /* set this to 0 for sub images. */
    img->dri_components = 0;
+   img->plane = plane;
    return img;
 }
 

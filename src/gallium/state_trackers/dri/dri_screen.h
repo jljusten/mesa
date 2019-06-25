@@ -105,6 +105,9 @@ struct __DRIimageRec {
    uint32_t dri_fourcc;
    uint32_t dri_components;
    unsigned use;
+   unsigned plane;
+   unsigned planes;
+   uint64_t modifier;
 
    void *loader_private;
 
