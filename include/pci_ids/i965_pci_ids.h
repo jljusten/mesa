@@ -106,6 +106,9 @@ CHIPSET(0x22B3, chv,     "Intel(R) HD Graphics (Cherryview)")
 #endif
 #if !defined(IRIS) || IRIS == 0 || IRIS == 2
 /* First try to load i965, then try iris */
+#endif
+#if !defined(IRIS) || IRIS == 0 || IRIS == 1
+/* First try to load iris, then try i965 */
 CHIPSET(0x1602, bdw_gt1, "Intel(R) Broadwell GT1")
 CHIPSET(0x1606, bdw_gt1, "Intel(R) Broadwell GT1")
 CHIPSET(0x160A, bdw_gt1, "Intel(R) Broadwell GT1")
@@ -230,9 +233,6 @@ CHIPSET(0x5A50, cnl_5x8, "Intel(R) HD Graphics (Cannonlake 5x8 GT2)")
 CHIPSET(0x5A51, cnl_5x8, "Intel(R) HD Graphics (Cannonlake 5x8 GT2)")
 CHIPSET(0x5A52, cnl_5x8, "Intel(R) HD Graphics (Cannonlake 5x8 GT2)")
 CHIPSET(0x5A54, cnl_5x8, "Intel(R) HD Graphics (Cannonlake 5x8 GT2)")
-#endif
-#if !defined(IRIS) || IRIS == 0 || IRIS == 1
-/* First try to load iris, then try i965 */
 CHIPSET(0x8A50, icl_8x8, "Intel(R) HD Graphics (Ice Lake 8x8 GT2)")
 CHIPSET(0x8A51, icl_8x8, "Intel(R) HD Graphics (Ice Lake 8x8 GT2)")
 CHIPSET(0x8A52, icl_8x8, "Intel(R) HD Graphics (Ice Lake 8x8 GT2)")
