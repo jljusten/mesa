@@ -1356,6 +1356,20 @@ dri2_query_dma_buf_modifiers(__DRIscreen *_screen, int fourcc, int max,
    return false;
 }
 
+static boolean
+dri2_query_dma_buf_format_modifier_attribs(__DRIscreen *_screen,
+                                           uint32_t fourcc, uint64_t modifier,
+                                           int attrib, uint64_t *value)
+{
+   struct pipe_screen *pscreen = dri_screen(_screen)->base.screen;
+
+   if (pscreen->query_dmabuf_modifier_attrib)
+      return pscreen->query_dmabuf_modifier_attrib(pscreen, fourcc, modifier,
+                                                   attrib, value);
+   else
+      return false;
+}
+
 static __DRIimage *
 dri2_from_dma_bufs(__DRIscreen *screen,
                    int width, int height, int fourcc,
@@ -1979,6 +1993,8 @@ dri2_init_screen(__DRIscreen * sPriv)
             dri2ImageExtension.queryDmaBufFormats = dri2_query_dma_buf_formats;
             dri2ImageExtension.queryDmaBufModifiers =
                                        dri2_query_dma_buf_modifiers;
+            dri2ImageExtension.queryDmaBufFormatModifierAttribs =
+                                       dri2_query_dma_buf_format_modifier_attribs;
          }
       }
    }
