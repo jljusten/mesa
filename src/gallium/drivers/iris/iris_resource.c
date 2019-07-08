@@ -51,6 +51,7 @@
 #include "isl/isl.h"
 #include "drm-uapi/drm_fourcc.h"
 #include "drm-uapi/i915_drm.h"
+#include <GL/internal/dri_interface.h>
 
 enum modifier_priority {
    MODIFIER_PRIORITY_INVALID = 0,
@@ -176,6 +177,30 @@ iris_query_dmabuf_modifiers(struct pipe_screen *pscreen,
    }
 
    *count = supported_mods;
+}
+
+static boolean
+iris_query_dmabuf_modifier_attrib(struct pipe_screen *pscreen, uint32_t fourcc,
+                                  uint64_t modifier, int attrib,
+                                  uint64_t *value)
+{
+   switch (attrib) {
+   case __DRI_IMAGE_FORMAT_MODIFIER_ATTRIB_PLANE_COUNT:
+      switch (modifier) {
+      case I915_FORMAT_MOD_Y_TILED_CCS:
+         *value = 2;
+         return true;
+      case I915_FORMAT_MOD_Y_TILED:
+      case I915_FORMAT_MOD_X_TILED:
+      case DRM_FORMAT_MOD_LINEAR:
+         *value = 1;
+         return true;
+      default:
+         return false;
+      }
+   default:
+      return false;
+   }
 }
 
 static isl_surf_usage_flags_t
@@ -1634,6 +1659,7 @@ void
 iris_init_screen_resource_functions(struct pipe_screen *pscreen)
 {
    pscreen->query_dmabuf_modifiers = iris_query_dmabuf_modifiers;
+   pscreen->query_dmabuf_modifier_attrib = iris_query_dmabuf_modifier_attrib;
    pscreen->resource_create_with_modifiers =
       iris_resource_create_with_modifiers;
    pscreen->resource_create = u_transfer_helper_resource_create;
