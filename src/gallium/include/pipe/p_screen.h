@@ -404,6 +404,19 @@ struct pipe_screen {
                                   unsigned int *external_only, int *count);
 
    /**
+    * Check if the given image modifier and pipe_format are supported as a
+    * texture or drawing surface.
+    * \param fourcc    DRM fourcc; DRM_FORMAT_*
+    * \param modifier  DRM Modifier; DRM_FORMAT_MOD_*
+    * \param attrib    DRM attrib type; __DRI_IMAGE_FORMAT_MODIFIER_ATTRIB_*
+    * \param value     If return is true, then *value is set to the attrib
+    *                  value.
+    */
+   boolean (*query_dmabuf_modifier_attrib)(struct pipe_screen *,
+                                           uint32_t fourcc, uint64_t modifier,
+                                           int attrib, uint64_t *value);
+
+   /**
     * Create a memory object from a winsys handle
     *
     * The underlying memory is most often allocated in by a foregin API.
