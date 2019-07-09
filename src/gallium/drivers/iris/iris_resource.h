@@ -147,6 +147,11 @@ struct iris_resource {
        * If (1 << level) is set, HiZ is enabled for that miplevel.
        */
       uint16_t has_hiz;
+
+      /**
+       * Imported as dmabuf and aux data is currently in a separate resource.
+       */
+      bool half_imported;
    } aux;
 
    /**
@@ -406,6 +411,9 @@ void iris_resource_prepare_texture(struct iris_context *ice,
 void iris_resource_prepare_image(struct iris_context *ice,
                                  struct iris_batch *batch,
                                  struct iris_resource *res);
+
+void iris_resource_finish_aux_import(struct iris_screen *screen,
+                                     struct iris_resource *res);
 
 void iris_resource_check_level_layer(const struct iris_resource *res,
                                      uint32_t level, uint32_t layer);

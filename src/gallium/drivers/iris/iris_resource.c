@@ -380,7 +380,8 @@ create_aux_state_map(struct iris_resource *res, enum isl_aux_state initial)
  */
 static bool
 iris_resource_configure_aux(struct iris_screen *screen,
-                            struct iris_resource *res, uint64_t *aux_size_B,
+                            struct iris_resource *res, bool imported,
+                            uint64_t *aux_size_B,
                             uint32_t *alloc_flags,
                             unsigned *clear_color_state_size)
 {
@@ -434,7 +435,11 @@ iris_resource_configure_aux(struct iris_screen *screen,
        * For CCS_D, do the same thing.  On Gen9+, this avoids having any
        * undefined bits in the aux buffer.
        */
-      initial_state = ISL_AUX_STATE_PASS_THROUGH;
+      if (imported)
+         initial_state =
+            isl_drm_modifier_get_default_aux_state(res->mod_info->modifier);
+      else
+         initial_state = ISL_AUX_STATE_PASS_THROUGH;
       *alloc_flags |= BO_ALLOC_ZEROED;
       ok = isl_surf_get_ccs_surf(isl_dev, &res->surf, &res->aux.surf, 0);
       break;
@@ -532,7 +537,7 @@ iris_resource_alloc_separate_aux(struct iris_screen *screen,
    uint32_t alloc_flags;
    uint64_t size;
    unsigned clear_color_state_size;
-   if (!iris_resource_configure_aux(screen, res, &size, &alloc_flags,
+   if (!iris_resource_configure_aux(screen, res, false, &size, &alloc_flags,
                                     &clear_color_state_size))
       return false;
 
@@ -552,6 +557,34 @@ iris_resource_alloc_separate_aux(struct iris_screen *screen,
       return false;
 
    return true;
+}
+
+void
+iris_resource_finish_aux_import(struct iris_screen *screen,
+                                struct iris_resource *res)
+{
+   assert(res->aux.half_imported && res->mod_info && res->base.next != NULL);
+
+   assert(!res->mod_info->supports_clear_color);
+
+   struct iris_resource *aux_res = (void *) res->base.next;
+   assert(aux_res->aux.surf.row_pitch_B && aux_res->aux.offset &&
+          aux_res->aux.bo);
+
+   /* Steal bo from import resource, so no need for iris_bo_reference. */
+   assert(res->bo == aux_res->aux.bo);
+   res->aux.bo = aux_res->aux.bo;
+   aux_res->aux.bo = NULL;
+
+   res->aux.offset = aux_res->aux.offset;
+
+   assert(res->bo->size >= (res->aux.offset + res->aux.surf.size_B));
+   assert(res->aux.clear_color_bo == NULL);
+   res->aux.clear_color_offset = 0;
+
+   assert(aux_res->aux.surf.row_pitch_B == res->aux.surf.row_pitch_B);
+
+   res->aux.half_imported = false;
 }
 
 static bool
@@ -752,7 +785,7 @@ iris_resource_create_with_modifiers(struct pipe_screen *pscreen,
    uint64_t aux_size = 0;
    unsigned clear_color_state_size;
    bool aux_enabled =
-      iris_resource_configure_aux(screen, res, &aux_size,
+      iris_resource_configure_aux(screen, res, false, &aux_size,
                                   &aux_preferred_alloc_flags,
                                   &clear_color_state_size);
    aux_enabled = aux_enabled && res->aux.surf.size_B > 0;
@@ -901,27 +934,59 @@ iris_resource_from_handle(struct pipe_screen *pscreen,
    if (templ->target == PIPE_BUFFER) {
       res->surf.tiling = ISL_TILING_LINEAR;
    } else {
-      UNUSED const bool isl_surf_created_successfully =
-         isl_surf_init(&screen->isl_dev, &res->surf,
-                       .dim = target_to_isl_surf_dim(templ->target),
-                       .format = fmt.fmt,
-                       .width = templ->width0,
-                       .height = templ->height0,
-                       .depth = templ->depth0,
-                       .levels = templ->last_level + 1,
-                       .array_len = templ->array_size,
-                       .samples = MAX2(templ->nr_samples, 1),
-                       .min_alignment_B = 0,
-                       .row_pitch_B = whandle->stride,
-                       .usage = isl_usage,
-                       .tiling_flags = 1 << res->mod_info->tiling);
-      assert(isl_surf_created_successfully);
-      assert(res->bo->tiling_mode ==
-             isl_tiling_to_i915_tiling(res->surf.tiling));
+      if (whandle->modifier == DRM_FORMAT_MOD_INVALID || whandle->plane == 0) {
+         UNUSED const bool isl_surf_created_successfully =
+            isl_surf_init(&screen->isl_dev, &res->surf,
+                          .dim = target_to_isl_surf_dim(templ->target),
+                          .format = fmt.fmt,
+                          .width = templ->width0,
+                          .height = templ->height0,
+                          .depth = templ->depth0,
+                          .levels = templ->last_level + 1,
+                          .array_len = templ->array_size,
+                          .samples = MAX2(templ->nr_samples, 1),
+                          .min_alignment_B = 0,
+                          .row_pitch_B = whandle->stride,
+                          .usage = isl_usage,
+                          .tiling_flags = 1 << res->mod_info->tiling);
+         assert(isl_surf_created_successfully);
+         assert(res->bo->tiling_mode ==
+                isl_tiling_to_i915_tiling(res->surf.tiling));
 
-      // XXX: create_ccs_buf_for_image?
-      if (!iris_resource_alloc_separate_aux(screen, res))
-         goto fail;
+         // XXX: create_ccs_buf_for_image?
+         if (whandle->modifier == DRM_FORMAT_MOD_INVALID) {
+            if (!iris_resource_alloc_separate_aux(screen, res))
+               goto fail;
+         } else {
+            if (res->mod_info->aux_usage != ISL_AUX_USAGE_NONE) {
+               uint32_t alloc_flags;
+               uint64_t size;
+               unsigned clear_color_state_size;
+               res->aux.usage = res->mod_info->aux_usage;
+               res->aux.possible_usages = 1 << res->mod_info->aux_usage;
+               res->aux.sampler_usages = res->aux.possible_usages;
+               bool ok = iris_resource_configure_aux(screen, res, true, &size,
+                                                     &alloc_flags,
+                                                     &clear_color_state_size);
+               assert(ok);
+               /* This modifier based image has additional parameters, which
+                * will be reconstructed later in
+                * iris_resource_finish_aux_import.
+                */
+               res->aux.half_imported = true;
+            }
+         }
+      } else {
+         /* Save modifier import information to reconstruct later. After
+          * import, this will be available under a second image accessible
+          * from the main image with res->base.next. See
+          * iris_resource_finish_aux_import.
+          */
+         res->aux.surf.row_pitch_B = whandle->stride;
+         res->aux.offset = whandle->offset;
+         res->aux.bo = res->bo;
+         res->bo = NULL;
+      }
    }
 
    return &res->base;
