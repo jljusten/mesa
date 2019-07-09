@@ -78,6 +78,9 @@ can_fast_clear_color(struct iris_context *ice,
    if (res->aux.usage == ISL_AUX_USAGE_NONE)
       return false;
 
+   if (res->mod_info)
+      return false;
+
    /* Surface state can only record one fast clear color value. Therefore
     * unless different levels/layers agree on the color it can be used to
     * represent only single level/layer. Here it will be reserved for the
@@ -364,6 +367,9 @@ can_fast_clear_depth(struct iris_context *ice,
                      float depth)
 {
    struct pipe_resource *p_res = (void *) res;
+
+   if (res->mod_info)
+      return false;
 
    /* Check for partial clears */
    if (box->x > 0 || box->y > 0 ||
