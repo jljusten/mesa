@@ -285,6 +285,12 @@ add_aux_state_tracking_buffer(struct anv_image *image,
       }
    }
 
+   /* Add some padding to make sure the fast clear color state buffer starts at
+    * a 4K alignment.
+    */
+   image->planes[plane].size = ALIGN(image->planes[plane].size, 4096);
+   image->size = ALIGN(image->size, 4096);
+
    image->planes[plane].fast_clear_state_offset =
       image->planes[plane].offset + image->planes[plane].size;
 
