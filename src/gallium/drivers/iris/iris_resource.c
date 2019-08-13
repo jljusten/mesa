@@ -441,8 +441,7 @@ iris_resource_alloc_aux(struct iris_screen *screen, struct iris_resource *res)
          return false;
       }
 
-      if (memset_value != 0)
-         memset(map, memset_value, res->aux.surf.size_B);
+      memset(map, memset_value, res->aux.surf.size_B);
 
       /* Zero the indirect clear color to match ::fast_clear_color. */
       memset((char *)map + res->aux.clear_color_offset, 0,
