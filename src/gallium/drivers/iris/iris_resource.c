@@ -772,7 +772,8 @@ iris_resource_create_with_modifiers(struct pipe_screen *pscreen,
       iris_resource_configure_aux(screen, res, false, &aux_size,
                                   &aux_preferred_alloc_flags);
    aux_enabled = aux_enabled && res->aux.surf.size_B > 0;
-   const bool separate_aux = aux_enabled && !res->mod_info;
+   /* s/false/has_depth/ to keep surfaces with depth using separate aux. */
+   const bool separate_aux = aux_enabled && !res->mod_info && false;
    uint64_t aux_offset;
    uint64_t bo_size;
 
@@ -804,8 +805,11 @@ iris_resource_create_with_modifiers(struct pipe_screen *pscreen,
          res->aux.offset += aux_offset;
          unsigned clear_color_state_size =
             iris_get_aux_clear_color_state_size(screen);
-         if (clear_color_state_size > 0)
+         if (clear_color_state_size > 0) {
+            res->aux.clear_color_bo = res->aux.bo;
+            iris_bo_reference(res->aux.clear_color_bo);
             res->aux.clear_color_offset += aux_offset;
+         }
          if (!iris_resource_init_aux_buf(res, flags, clear_color_state_size))
             aux_enabled = false;
       }
