@@ -541,7 +541,6 @@ iris_blit(struct pipe_context *ctx, const struct pipe_blit_info *info)
                     filter, mirror_x, mirror_y);
       }
    }
-
    blorp_batch_finish(&blorp_batch);
 
    tex_cache_flush_hack(batch, src_fmt.fmt, src_res->surf.format);
