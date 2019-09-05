@@ -59,6 +59,7 @@ enum modifier_priority {
    MODIFIER_PRIORITY_X,
    MODIFIER_PRIORITY_Y,
    MODIFIER_PRIORITY_Y_CCS,
+   MODIFIER_PRIORITY_Y_GEN12_RC_CCS,
 };
 
 static const uint64_t priority_to_modifier[] = {
@@ -67,15 +68,21 @@ static const uint64_t priority_to_modifier[] = {
    [MODIFIER_PRIORITY_X] = I915_FORMAT_MOD_X_TILED,
    [MODIFIER_PRIORITY_Y] = I915_FORMAT_MOD_Y_TILED,
    [MODIFIER_PRIORITY_Y_CCS] = I915_FORMAT_MOD_Y_TILED_CCS,
+   [MODIFIER_PRIORITY_Y_GEN12_RC_CCS] = I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS,
 };
 
 static bool
 modifier_is_supported(const struct gen_device_info *devinfo,
                       enum pipe_format pfmt, uint64_t modifier)
 {
-   /* XXX: do something real */
-   switch (modifier) {
-   case I915_FORMAT_MOD_Y_TILED_CCS: {
+   const struct isl_drm_modifier_info *modinfo =
+      isl_drm_modifier_get_info(modifier);
+
+   /* ISL had better know about the modifier */
+   if (!modinfo)
+      return false;
+
+   if (isl_aux_usage_has_ccs(modinfo->aux_usage)) {
       if (unlikely(INTEL_DEBUG & DEBUG_NO_RBC))
          return false;
 
@@ -85,11 +92,18 @@ modifier_is_supported(const struct gen_device_info *devinfo,
 
       enum isl_format linear_format = isl_format_srgb_to_linear(rt_format);
 
-      if (!isl_format_supports_ccs_e(devinfo, linear_format))
+      if (modinfo->aux_usage == ISL_AUX_USAGE_CCS_E &&
+          !isl_format_supports_ccs_e(devinfo, linear_format)) {
          return false;
-
-      return devinfo->gen >= 9 && devinfo->gen <= 11;
+      }
    }
+
+   /* XXX: do something real */
+   switch (modifier) {
+   case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
+      return devinfo->gen == 12;
+   case I915_FORMAT_MOD_Y_TILED_CCS:
+      return devinfo->gen >= 9 && devinfo->gen <= 11;
    case I915_FORMAT_MOD_Y_TILED:
    case I915_FORMAT_MOD_X_TILED:
    case DRM_FORMAT_MOD_LINEAR:
@@ -112,6 +126,9 @@ select_best_modifier(struct gen_device_info *devinfo, enum pipe_format pfmt,
          continue;
 
       switch (modifiers[i]) {
+      case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
+         prio = MAX2(prio, MODIFIER_PRIORITY_Y_GEN12_RC_CCS);
+         break;
       case I915_FORMAT_MOD_Y_TILED_CCS:
          prio = MAX2(prio, MODIFIER_PRIORITY_Y_CCS);
          break;
@@ -171,6 +188,7 @@ iris_query_dmabuf_modifiers(struct pipe_screen *pscreen,
       I915_FORMAT_MOD_X_TILED,
       I915_FORMAT_MOD_Y_TILED,
       I915_FORMAT_MOD_Y_TILED_CCS,
+      I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS,
    };
 
    int supported_mods = 0;
