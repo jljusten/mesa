@@ -1619,6 +1619,12 @@ blorp_emit_depth_stencil_config(struct blorp_batch *batch,
       info.stencil_address =
          blorp_emit_reloc(batch, dw + isl_dev->ds.stencil_offset / 4,
                           stencil_address, 0);
+#if GEN_GEN >=12
+      if (params->stencil.aux_usage == ISL_AUX_USAGE_CCS_E) {
+         blorp_emit_reloc(batch, dw + isl_dev->ds.stencil_offset / 4,
+                          params->stencil.aux_addr, 0);
+      }
+#endif
    }
 
    isl_emit_depth_stencil_hiz_s(isl_dev, dw, &info);
