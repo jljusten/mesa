@@ -1377,6 +1377,7 @@ blorp_emit_surface_state(struct blorp_batch *batch,
    isl_surf_fill_state(batch->blorp->isl_dev, state,
                        .surf = &surf, .view = &surface->view,
                        .aux_surf = &surface->aux_surf, .aux_usage = aux_usage,
+                       .aux_op = aux_op,
                        .address =
                           blorp_get_surface_address(batch, surface->addr),
                        .aux_address = aux_usage == ISL_AUX_USAGE_NONE ? 0 :

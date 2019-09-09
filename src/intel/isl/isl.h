@@ -1332,6 +1332,7 @@ struct isl_surf_fill_state_info {
    const struct isl_surf *aux_surf;
    enum isl_aux_usage aux_usage;
    uint64_t aux_address;
+   enum isl_aux_op aux_op;
 
    /**
     * The clear color for this surface
