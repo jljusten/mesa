@@ -551,6 +551,7 @@ iris_resource_configure_aux(struct iris_screen *screen,
       break;
    case ISL_AUX_USAGE_CCS_D:
    case ISL_AUX_USAGE_CCS_E:
+   case ISL_AUX_USAGE_MC:
       /* When CCS_E is used, we need to ensure that the CCS starts off in
        * a valid state.  From the Sky Lake PRM, "MCS Buffer for Render
        * Target(s)":
@@ -561,8 +562,8 @@ iris_resource_configure_aux(struct iris_screen *screen,
        * A CCS value of 0 indicates that the corresponding block is in the
        * pass-through state which is what we want.
        *
-       * For CCS_D, do the same thing.  On Gen9+, this avoids having any
-       * undefined bits in the aux buffer.
+       * For MC and CCS_D, do the same thing.  On Gen9+, this avoids having
+       * any undefined bits in the aux buffer.
        */
       if (imported)
          initial_state =
