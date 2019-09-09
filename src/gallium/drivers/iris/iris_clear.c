@@ -78,8 +78,10 @@ can_fast_clear_color(struct iris_context *ice,
    if (INTEL_DEBUG & DEBUG_NO_FAST_CLEAR)
       return false;
 
-   if (res->aux.usage == ISL_AUX_USAGE_NONE)
+   if (res->aux.usage == ISL_AUX_USAGE_NONE ||
+       res->aux.usage == ISL_AUX_USAGE_MC) {
       return false;
+   }
 
    /* Check for partial clear */
    if (box->x > 0 || box->y > 0 ||
