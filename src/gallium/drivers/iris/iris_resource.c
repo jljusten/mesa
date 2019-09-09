@@ -59,6 +59,7 @@ enum modifier_priority {
    MODIFIER_PRIORITY_X,
    MODIFIER_PRIORITY_Y,
    MODIFIER_PRIORITY_Y_CCS,
+   MODIFIER_PRIORITY_Y_GEN12_MC_CCS,
    MODIFIER_PRIORITY_Y_GEN12_RC_CCS,
 };
 
@@ -68,6 +69,7 @@ static const uint64_t priority_to_modifier[] = {
    [MODIFIER_PRIORITY_X] = I915_FORMAT_MOD_X_TILED,
    [MODIFIER_PRIORITY_Y] = I915_FORMAT_MOD_Y_TILED,
    [MODIFIER_PRIORITY_Y_CCS] = I915_FORMAT_MOD_Y_TILED_CCS,
+   [MODIFIER_PRIORITY_Y_GEN12_MC_CCS] = I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS,
    [MODIFIER_PRIORITY_Y_GEN12_RC_CCS] = I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS,
 };
 
@@ -96,11 +98,17 @@ modifier_is_supported(const struct gen_device_info *devinfo,
           !isl_format_supports_ccs_e(devinfo, linear_format)) {
          return false;
       }
+
+      if (modinfo->aux_usage == ISL_AUX_USAGE_MC &&
+          !isl_format_supports_mc(devinfo, linear_format)) {
+         return false;
+      }
    }
 
    /* XXX: do something real */
    switch (modifier) {
    case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
+   case I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS:
       return devinfo->gen == 12;
    case I915_FORMAT_MOD_Y_TILED_CCS:
       return devinfo->gen >= 9 && devinfo->gen <= 11;
@@ -128,6 +136,9 @@ select_best_modifier(struct gen_device_info *devinfo, enum pipe_format pfmt,
       switch (modifiers[i]) {
       case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
          prio = MAX2(prio, MODIFIER_PRIORITY_Y_GEN12_RC_CCS);
+         break;
+      case I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS:
+         prio = MAX2(prio, MODIFIER_PRIORITY_Y_GEN12_MC_CCS);
          break;
       case I915_FORMAT_MOD_Y_TILED_CCS:
          prio = MAX2(prio, MODIFIER_PRIORITY_Y_CCS);
@@ -188,6 +199,7 @@ iris_query_dmabuf_modifiers(struct pipe_screen *pscreen,
       I915_FORMAT_MOD_X_TILED,
       I915_FORMAT_MOD_Y_TILED,
       I915_FORMAT_MOD_Y_TILED_CCS,
+      I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS,
       I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS,
    };
 
@@ -464,7 +476,8 @@ iris_resource_configure_aux(struct iris_screen *screen,
     * the user if no modifier is specified.
     */
    assert(!res->mod_info || res->mod_info->aux_usage == ISL_AUX_USAGE_NONE ||
-                            res->mod_info->aux_usage == ISL_AUX_USAGE_CCS_E);
+                            res->mod_info->aux_usage == ISL_AUX_USAGE_CCS_E ||
+                            res->mod_info->aux_usage == ISL_AUX_USAGE_MC);
 
    const bool has_mcs = !res->mod_info &&
       isl_surf_get_mcs_surf(&screen->isl_dev, &res->surf, &res->aux.surf);
