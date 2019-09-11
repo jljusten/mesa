@@ -858,9 +858,16 @@ dri2_create_image_from_name(__DRIscreen *_screen,
 }
 
 static unsigned
-dri2_get_modifier_num_planes(uint64_t modifier)
+dri2_get_modifier_num_planes(uint64_t modifier, int fourcc)
 {
+   const struct dri2_format_mapping *map = dri2_get_mapping_by_fourcc(fourcc);
+
    switch (modifier) {
+   case I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS:
+      return map->nplanes * 2;
+   case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC:
+      return 3;
+   case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
    case I915_FORMAT_MOD_Y_TILED_CCS:
       return 2;
    case DRM_FORMAT_MOD_BROADCOM_UIF:
@@ -901,7 +908,7 @@ dri2_create_image_from_fd(__DRIscreen *_screen,
    __DRIimage *img = NULL;
    unsigned err = __DRI_IMAGE_ERROR_SUCCESS;
    int i, expected_num_fds;
-   uint64_t mod_planes = dri2_get_modifier_num_planes(modifier);
+   uint64_t mod_planes = dri2_get_modifier_num_planes(modifier, fourcc);
 
    if (!map || (modifier != DRM_FORMAT_MOD_INVALID && mod_planes == 0)) {
       err = __DRI_IMAGE_ERROR_BAD_MATCH;
@@ -1428,7 +1435,7 @@ dri2_query_dma_buf_format_modifier_attribs(__DRIscreen *_screen,
 {
    switch (attrib) {
    case __DRI_IMAGE_FORMAT_MODIFIER_ATTRIB_PLANE_COUNT: {
-      uint64_t mod_planes = dri2_get_modifier_num_planes(modifier);
+      uint64_t mod_planes = dri2_get_modifier_num_planes(modifier, fourcc);
       if (mod_planes > 0)
          *value = mod_planes;
       return mod_planes > 0;
