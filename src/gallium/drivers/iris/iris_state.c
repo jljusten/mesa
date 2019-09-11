@@ -4781,6 +4781,10 @@ pin_depth_and_stencil_buffers(struct iris_batch *batch,
 
    if (sres) {
       iris_use_pinned_bo(batch, sres->bo, cso_zsa->stencil_writes_enabled);
+      if (sres->aux.bo) {
+         iris_use_pinned_bo(batch, sres->aux.bo,
+                            cso_zsa->stencil_writes_enabled);
+      }
    }
 }
 
