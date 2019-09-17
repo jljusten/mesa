@@ -729,7 +729,6 @@ iris_resource_finish_aux_import(struct pipe_screen *pscreen,
 {
    struct iris_screen *screen = (struct iris_screen *)pscreen;
    assert(iris_resource_unfinished_aux_import(res));
-   assert(!res->mod_info->supports_clear_color);
 
    struct iris_resource *aux_res = (void *) res->base.next;
    assert(aux_res->aux.surf.row_pitch_B && aux_res->aux.offset &&
@@ -750,7 +749,20 @@ iris_resource_finish_aux_import(struct pipe_screen *pscreen,
    unsigned clear_color_state_size =
       iris_get_aux_clear_color_state_size(screen);
 
-   if (clear_color_state_size > 0) {
+   if (res->mod_info->modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC) {
+      struct iris_resource *cc_res = (void *) aux_res->base.next;
+      assert(cc_res->aux.surf.row_pitch_B == 0 && aux_res->aux.offset &&
+             cc_res->aux.bo);
+
+      assert(aux_res->bo == cc_res->aux.bo);
+      iris_bo_reference(cc_res->aux.bo);
+      res->aux.clear_color_bo = cc_res->bo;
+
+      res->aux.clear_color_offset = cc_res->offset;
+
+      iris_resource_destroy(&screen->base, aux_res->base.next);
+      aux_res->base.next = NULL;
+   } else if (clear_color_state_size > 0) {
       res->aux.clear_color_bo =
          iris_bo_alloc(screen->bufmgr, "clear color buffer",
                        clear_color_state_size, IRIS_MEMZONE_OTHER);
@@ -1059,6 +1071,11 @@ iris_resource_from_handle(struct pipe_screen *pscreen,
                 */
             }
          }
+      } else if (whandle->plane == 2 &&
+                 modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC) {
+         res->aux.clear_color_offset = whandle->offset;
+         res->aux.clear_color_bo = res->bo;
+         res->bo = NULL;
       } else {
          /* Save modifier import information to reconstruct later. After
           * import, this will be available under a second image accessible
