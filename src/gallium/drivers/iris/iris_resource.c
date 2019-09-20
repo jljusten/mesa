@@ -1144,6 +1144,8 @@ iris_resource_get_param(struct pipe_screen *screen,
    bool mod_with_aux =
       res->mod_info && res->mod_info->aux_usage != ISL_AUX_USAGE_NONE;
    bool wants_aux = mod_with_aux && plane > 0;
+   bool wants_cc = plane == 2 && res->mod_info &&
+      res->mod_info->modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC;
    bool result;
    unsigned handle;
 
@@ -1157,7 +1159,8 @@ iris_resource_get_param(struct pipe_screen *screen,
    switch (param) {
    case PIPE_RESOURCE_PARAM_NPLANES:
       if (mod_with_aux) {
-         *value = 2;
+         *value = res->mod_info->modifier ==
+            I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC ? 3 : 2;
       } else {
          unsigned count = 0;
          for (struct pipe_resource *cur = resource; cur; cur = cur->next)
@@ -1169,7 +1172,8 @@ iris_resource_get_param(struct pipe_screen *screen,
       *value = wants_aux ? res->aux.surf.row_pitch_B : res->surf.row_pitch_B;
       return true;
    case PIPE_RESOURCE_PARAM_OFFSET:
-      *value = wants_aux ? res->aux.offset : 0;
+      *value = wants_cc ? res->aux.clear_color_offset :
+               wants_aux ? res->aux.offset : 0;
       return true;
    case PIPE_RESOURCE_PARAM_MODIFIER:
       *value = res->mod_info ? res->mod_info->modifier :
@@ -1206,12 +1210,17 @@ iris_resource_get_handle(struct pipe_screen *pscreen,
 
    iris_resource_disable_aux_on_first_query(resource, usage);
 
-   struct iris_bo *bo;
+   struct iris_bo *bo = NULL;
    if (mod_with_aux && whandle->plane > 0) {
-      assert(res->aux.bo);
-      bo = res->aux.bo;
-      whandle->stride = res->aux.surf.row_pitch_B;
-      whandle->offset = res->aux.offset;
+      if (res->mod_info->modifier == I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC
+          && whandle->plane == 2) {
+         bo = res->aux.clear_color_bo;
+         whandle->offset = res->aux.clear_color_offset;
+      } else {
+         bo = res->aux.bo;
+         whandle->stride = res->aux.surf.row_pitch_B;
+         whandle->offset = res->aux.offset;
+      }
    } else {
       /* If this is a buffer, stride should be 0 - no need to special case */
       whandle->stride = res->surf.row_pitch_B;
@@ -1232,6 +1241,7 @@ iris_resource_get_handle(struct pipe_screen *pscreen,
    }
 #endif
 
+   assert(bo != NULL);
    switch (whandle->type) {
    case WINSYS_HANDLE_TYPE_SHARED:
       return iris_bo_flink(bo, &whandle->handle) == 0;
