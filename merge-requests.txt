@@ -2,3 +2,4 @@ Summary: https://gitlab.freedesktop.org/jljusten/mesa/issues/1
 modifiers: https://gitlab.freedesktop.org/mesa/mesa/merge_requests/2282
 compaction: https://gitlab.freedesktop.org/mesa/mesa/merge_requests/2356
 prim-rep: https://gitlab.freedesktop.org/mesa/mesa/merge_requests/2313
+stencil-ccs: https://gitlab.freedesktop.org/mesa/mesa/merge_requests/2344
