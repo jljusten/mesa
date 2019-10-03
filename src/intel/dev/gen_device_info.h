@@ -81,6 +81,7 @@ struct gen_device_info
    bool disable_ccs_repack;
    bool has_aux_map;
    bool has_tiling_uapi;
+   bool has_local_mem;
 
    /**
     * \name Intel hardware quirks
