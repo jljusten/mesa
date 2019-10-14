@@ -87,7 +87,7 @@ modifier_is_supported(const struct gen_device_info *devinfo,
       return false;
 
    if (isl_aux_usage_has_ccs(modinfo->aux_usage)) {
-      if (unlikely(INTEL_DEBUG & DEBUG_NO_RBC))
+      if (true /* Force disable compression*/)
          return false;
 
       enum isl_format rt_format =
@@ -492,11 +492,7 @@ iris_resource_configure_aux(struct iris_screen *screen,
    const bool has_hiz = !res->mod_info && !(INTEL_DEBUG & DEBUG_NO_HIZ) &&
       isl_surf_get_hiz_surf(&screen->isl_dev, &res->surf, &res->aux.surf);
 
-   const bool has_ccs =
-      ((!res->mod_info && !(INTEL_DEBUG & DEBUG_NO_RBC)) ||
-       (res->mod_info && res->mod_info->aux_usage != ISL_AUX_USAGE_NONE)) &&
-      isl_surf_get_ccs_surf(&screen->isl_dev, &res->surf, &res->aux.surf,
-                            &res->aux.extra_aux.surf, 0);
+   const bool has_ccs = false; /* Force disable compression*/
 
    /* Having both HIZ and MCS is impossible. */
    assert(!has_mcs || !has_hiz);
