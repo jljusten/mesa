@@ -233,6 +233,19 @@ genX(init_device_state)(struct anv_device *device)
    anv_batch_emit(&batch, GENX(3DSTATE_WM_HZ_OP), hzp);
 #endif
 
+#if GEN_GEN == 12
+   uint32_t sampler_mode;
+   anv_pack_struct(&sampler_mode, GENX(SAMPLER_MODE),
+                   /* GEN:BUG:1406941453 */
+                   .SmallPL = true,
+                   .SmallPLMask = true);
+
+   anv_batch_emit(&batch, GENX(MI_LOAD_REGISTER_IMM), lri) {
+      lri.RegisterOffset = GENX(SAMPLER_MODE_num);
+      lri.DataDWord      = sampler_mode;
+   }
+#endif
+
 #if GEN_GEN == 10
    gen10_emit_wa_lri_to_cache_mode_zero(&batch);
 #endif

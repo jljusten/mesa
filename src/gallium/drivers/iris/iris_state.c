@@ -967,6 +967,15 @@ iris_init_render_context(struct iris_batch *batch)
    iris_upload_slice_hashing_state(batch);
 #endif
 
+#if GEN_GEN == 12
+   iris_pack_state(GENX(SAMPLER_MODE), &reg_val, reg) {
+      /* GEN:BUG:1406941453 */
+      reg.SmallPL = true;
+      reg.SmallPLMask = true;
+   }
+   iris_emit_lri(batch, SAMPLER_MODE, reg_val);
+#endif
+
    /* 3DSTATE_DRAWING_RECTANGLE is non-pipelined, so we want to avoid
     * changing it dynamically.  We set it to the maximum size here, and
     * instead include the render target dimensions in the viewport, so
@@ -1019,6 +1028,15 @@ iris_init_compute_context(struct iris_batch *batch)
    iris_emit_default_l3_config(batch, devinfo, true);
 
    init_state_base_address(batch);
+
+#if GEN_GEN == 12
+   iris_pack_state(GENX(SAMPLER_MODE), &reg_val, reg) {
+      /* GEN:BUG:1406941453 */
+      reg.SmallPL = true;
+      reg.SmallPLMask = true;
+   }
+   iris_emit_lri(batch, SAMPLER_MODE, reg_val);
+#endif
 
 #if GEN_GEN == 9
    if (devinfo->is_geminilake)
