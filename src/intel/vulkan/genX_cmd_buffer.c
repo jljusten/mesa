@@ -78,6 +78,13 @@ convert_pc_to_bits(struct GENX(PIPE_CONTROL) *pc) {
       fprintf(stderr, ") reason: %s\n", __FUNCTION__); \
    }
 
+static bool
+is_render_queue_cmd_buffer(const struct anv_cmd_buffer *cmd_buffer)
+{
+   struct anv_queue_family *queue_family = cmd_buffer->pool->queue_family;
+   return (queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+}
+
 void
 genX(cmd_buffer_emit_state_base_address)(struct anv_cmd_buffer *cmd_buffer)
 {
@@ -1163,7 +1170,8 @@ transition_color_buffer(struct anv_cmd_buffer *cmd_buffer,
                         VkImageLayout final_layout,
                         uint64_t src_queue_family,
                         uint64_t dst_queue_family,
-                        bool will_full_fast_clear)
+                        bool will_full_fast_clear,
+                        bool to_compute_queue)
 {
    struct anv_device *device = cmd_buffer->device;
    const struct intel_device_info *devinfo = &device->info;
@@ -1371,11 +1379,15 @@ transition_color_buffer(struct anv_cmd_buffer *cmd_buffer,
                   continue;
             }
 
-            anv_image_ccs_op(cmd_buffer, image,
-                             image->planes[plane].primary_surface.isl.format,
-                             ISL_SWIZZLE_IDENTITY,
-                             aspect, level, base_layer, level_layer_count,
-                             ISL_AUX_OP_AMBIGUATE, NULL, false);
+            if (is_render_queue_cmd_buffer(cmd_buffer)) {
+               anv_image_ccs_op(cmd_buffer, image,
+                                image->planes[plane].primary_surface.isl.format,
+                                ISL_SWIZZLE_IDENTITY,
+                                aspect, level, base_layer, level_layer_count,
+                                ISL_AUX_OP_AMBIGUATE, NULL, false);
+            } else {
+               /* TODO: clear aux data? */
+            }
 
             if (image->planes[plane].aux_usage == ISL_AUX_USAGE_CCS_E) {
                set_image_compressed_bit(cmd_buffer, image, aspect,
@@ -1451,6 +1463,9 @@ transition_color_buffer(struct anv_cmd_buffer *cmd_buffer,
        final_aux_usage != ISL_AUX_USAGE_CCS_E)
       resolve_op = ISL_AUX_OP_FULL_RESOLVE;
 
+   if (resolve_op == ISL_AUX_OP_PARTIAL_RESOLVE && to_compute_queue)
+      resolve_op = ISL_AUX_OP_FULL_RESOLVE;
+
    if (resolve_op == ISL_AUX_OP_NONE)
       return;
 
@@ -1496,11 +1511,13 @@ transition_color_buffer(struct anv_cmd_buffer *cmd_buffer,
             continue;
 
          if (image->samples == 1) {
-            anv_cmd_predicated_ccs_resolve(cmd_buffer, image,
-                                           image->planes[plane].primary_surface.isl.format,
-                                           ISL_SWIZZLE_IDENTITY,
-                                           aspect, level, array_layer, resolve_op,
-                                           final_fast_clear);
+            if (is_render_queue_cmd_buffer(cmd_buffer)) {
+               anv_cmd_predicated_ccs_resolve(cmd_buffer, image,
+                                              image->planes[plane].primary_surface.isl.format,
+                                              ISL_SWIZZLE_IDENTITY,
+                                              aspect, level, array_layer, resolve_op,
+                                              final_fast_clear);
+            }
          } else {
             /* We only support fast-clear on the first layer so partial
              * resolves should not be used on other layers as they will use
@@ -2461,6 +2478,19 @@ void genX(CmdPipelineBarrier)(
          VkImageAspectFlags color_aspects =
             anv_image_expand_aspects(image, range->aspectMask);
          anv_foreach_image_aspect_bit(aspect_bit, image, color_aspects) {
+            bool to_compute_queue = false;
+            uint32_t dst_family = pImageMemoryBarriers[i].dstQueueFamilyIndex;
+            if (dst_family != VK_QUEUE_FAMILY_IGNORED &&
+                dst_family != VK_QUEUE_FAMILY_EXTERNAL) {
+               const struct anv_physical_device *pdevice =
+                  cmd_buffer->device->physical;
+               assert(dst_family < pdevice->queue.family_count);
+               const struct anv_queue_family *queue_family =
+                  &pdevice->queue.families[dst_family];
+               to_compute_queue =
+                  (queue_family->queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0;
+            }
+
             transition_color_buffer(cmd_buffer, image, 1UL << aspect_bit,
                                     range->baseMipLevel,
                                     anv_get_levelCount(image, range),
@@ -2469,7 +2499,8 @@ void genX(CmdPipelineBarrier)(
                                     pImageMemoryBarriers[i].newLayout,
                                     pImageMemoryBarriers[i].srcQueueFamilyIndex,
                                     pImageMemoryBarriers[i].dstQueueFamilyIndex,
-                                    false /* will_full_fast_clear */);
+                                    false, /* will_full_fast_clear */
+                                    to_compute_queue);
          }
       }
    }
@@ -5982,7 +6013,8 @@ cmd_buffer_begin_subpass(struct anv_cmd_buffer *cmd_buffer,
                                  att_state->current_layout, target_layout,
                                  VK_QUEUE_FAMILY_IGNORED,
                                  VK_QUEUE_FAMILY_IGNORED,
-                                 will_full_fast_clear);
+                                 will_full_fast_clear,
+                                 !is_render_queue_cmd_buffer(cmd_buffer));
          att_state->aux_usage =
             anv_layout_to_aux_usage(&cmd_buffer->device->info, image,
                                     VK_IMAGE_ASPECT_COLOR_BIT,
@@ -6663,7 +6695,8 @@ cmd_buffer_end_subpass(struct anv_cmd_buffer *cmd_buffer)
                                  att_state->current_layout, target_layout,
                                  VK_QUEUE_FAMILY_IGNORED,
                                  VK_QUEUE_FAMILY_IGNORED,
-                                 false /* will_full_fast_clear */);
+                                 false, /* will_full_fast_clear */
+                                 !is_render_queue_cmd_buffer(cmd_buffer));
       }
 
       if (image->aspects & VK_IMAGE_ASPECT_DEPTH_BIT) {
