@@ -1187,6 +1187,7 @@ update_from_topology(struct gen_device_info *devinfo,
          devinfo->l3_banks = 8;
       } else if (n_subslices > 2) {
          devinfo->l3_banks = 6;
+         devinfo->urb.size = 768;
       } else {
          devinfo->l3_banks = 4;
       }
