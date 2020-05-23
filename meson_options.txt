@@ -387,3 +387,10 @@ option(
   value : 'auto',
   description : 'Use ZSTD instead of ZLIB in some cases.'
 )
+option(
+  'rust-lang',
+  type : 'combo',
+  choices : ['auto', 'true', 'false'],
+  value : 'auto',
+  description : 'Enable code which uses the rust programming language.'
+)
