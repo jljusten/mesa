@@ -32,6 +32,20 @@ project(
 cc = meson.get_compiler('c')
 cpp = meson.get_compiler('cpp')
 
+_rust = get_option('rust-lang')
+if _rust != 'false'
+  _rustc = find_program('rustc', required : _rust == 'true')
+  if _rustc.found()
+    add_languages('rust')
+    rustc = meson.get_compiler('rust')
+    with_rust = true
+  else
+    with_rust = false
+  endif
+else
+  with_rust = false
+endif
+
 null_dep = dependency('', required : false)
 
 if get_option('layout') != 'mirror'
