@@ -51,6 +51,14 @@ aubinator_error_decode = executable(
   install : true
 )
 
+if with_rust
+  aubinator_rs = executable(
+    'aubinator_rs',
+    files('aubinator.rs'),
+    install : true
+  )
+endif
+
 i965_disasm = executable(
   'i965_disasm',
   files('i965_disasm.c'),
