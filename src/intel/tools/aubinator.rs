@@ -6,7 +6,15 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 
-pub fn main() {
+macro_rules! outln {
+    () => (write!(get_logger(), "\n").unwrap());
+    ($($arg:tt)*) => ({
+        writeln!(get_logger(), $($arg)*).unwrap();
+    })
+}
+
+pub fn main()
+{
     let cmd_line = parse_options();
     let cmd_line = if let Some(c) = cmd_line {
         c
@@ -14,7 +22,9 @@ pub fn main() {
         std::process::exit(-1);
     };
 
-    println!("Aubinator! I'll be back!");
+    unsafe { LOGGER = Some(Logger::new(cmd_line.disable_pager)); }
+    outln!("Aubinator! I'll be back!");
+    unsafe { LOGGER = None; }
 }
 
 #[derive(Debug)]
@@ -123,4 +133,52 @@ fn parse_options() -> Option<CmdLine> {
                    no_offsets,
                    xml_dir,
     })
+}
+
+struct Logger {
+    pager: Option<std::process::Child>,
+}
+
+impl Logger {
+    fn new(disable_pager: bool) -> Logger {
+        let pager = if disable_pager {
+            None
+        } else {
+            Some(Command::new("less")
+                .arg("-FRSi")
+                .stdin(Stdio::piped())
+                .spawn()
+                .expect("Failed to execute pager!"))
+        };
+
+        Logger { pager}
+    }
+
+    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::io::Result<()> {
+        match &mut self.pager {
+            Some(p) => {
+                let dst = p.stdin.as_mut().expect("Failed to open stdin");
+                dst.write_fmt(fmt)
+            },
+            _ => {
+                let dst = std::io::stdout();
+                let mut dst = dst.lock();
+                dst.write_fmt(fmt)
+            }
+        }
+    }
+}
+
+impl Drop for Logger {
+    fn drop(&mut self) {
+        if let Some(p) = &mut self.pager {
+            p.wait().expect("Could not wait for pager process to finish!");
+        }
+    }
+}
+
+static mut LOGGER: Option<Logger> = None;
+
+fn get_logger() -> &'static mut Logger {
+    unsafe { LOGGER.as_mut().unwrap() }
 }
