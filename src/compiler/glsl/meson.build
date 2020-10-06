@@ -74,37 +74,42 @@ ir_expression_operation_strings_h = custom_target(
 
 float64_glsl_h = custom_target(
   'float64_glsl.h',
-  input : [files_xxd, 'float64.glsl'],
+  input : ['float64.glsl'],
   output : 'float64_glsl.h',
-  command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'float64_source'],
+  command : [prog_python, files_xxd, '@OUTPUT@', '@INPUT@', '-n', 'float64_source'],
+  depend_files : files_xxd,
 )
 
 cross_platform_settings_piece_all_h = custom_target(
   'cross_platform_settings_piece_all.h',
-  input : [files_xxd, 'CrossPlatformSettings_piece_all.glsl'],
+  input : ['CrossPlatformSettings_piece_all.glsl'],
   output : 'cross_platform_settings_piece_all.h',
-  command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'cross_platform_settings_piece_all_header'],
+  command : [prog_python, files_xxd,'@OUTPUT@', '@INPUT@', '-n', 'cross_platform_settings_piece_all_header'],
+  depend_files : files_xxd,
 )
 
 bc1_glsl_h = custom_target(
   'bc1_glsl.h',
-  input : [files_xxd, 'bc1.glsl'],
+  input : ['bc1.glsl'],
   output : 'bc1_glsl.h',
-  command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'bc1_source'],
+  command : [prog_python, files_xxd,'@OUTPUT@', '@INPUT@', '-n', 'bc1_source'],
+  depend_files : files_xxd,
 )
 
 bc4_glsl_h = custom_target(
   'bc4_glsl.h',
-  input : [files_xxd, 'bc4.glsl'],
+  input : ['bc4.glsl'],
   output : 'bc4_glsl.h',
-  command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'bc4_source'],
+  command : [prog_python, files_xxd, '@OUTPUT@', '@INPUT@', '-n', 'bc4_source'],
+  depend_files : files_xxd,
 )
 
 etc2_rgba_stitch_glsl_h = custom_target(
   'etc2_rgba_stitch_glsl.h',
-  input : [files_xxd, 'etc2_rgba_stitch.glsl'],
+  input : ['etc2_rgba_stitch.glsl'],
   output : 'etc2_rgba_stitch_glsl.h',
-  command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'etc2_rgba_stitch_source'],
+  command : [prog_python, files_xxd, '@OUTPUT@', '@INPUT@', '-n', 'etc2_rgba_stitch_source'],
+  depend_files : files_xxd,
 )
 
 astc_glsl_h = custom_target(

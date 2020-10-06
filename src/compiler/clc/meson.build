@@ -33,17 +33,19 @@ if with_microsoft_clc
   if dep_llvm.version().version_compare('< 15.0')
     opencl_c_h = custom_target(
       'opencl-c.h',
-      input : [files_xxd, join_paths(clang_resource_dir, 'opencl-c.h')],
+      input : [join_paths(clang_resource_dir, 'opencl-c.h')],
       output : 'opencl-c.h.h',
-      command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'opencl_c_source'],
+      command : [prog_python, files_xxd, '@OUTPUT@', '@INPUT@', '-n', 'opencl_c_source'],
+      depend_files : files_xxd,
     )
   endif
 
   opencl_c_base_h = custom_target(
     'opencl-c-base.h',
-    input : [files_xxd, join_paths(clang_resource_dir, 'opencl-c-base.h')],
+    input : [join_paths(clang_resource_dir, 'opencl-c-base.h')],
     output : 'opencl-c-base.h.h',
-    command : [prog_python, '@INPUT@', '@OUTPUT@', '-n', 'opencl_c_base_source'],
+    command : [prog_python, files_xxd, '@OUTPUT@', '@INPUT@', '-n', 'opencl_c_base_source'],
+    depend_files : files_xxd,
   )
 
   _libclc_sources += [opencl_c_base_h]
