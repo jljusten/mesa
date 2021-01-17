@@ -236,6 +236,13 @@ idep_xmlconfig = declare_dependency(
 
 files_xxd = files('xxd.py')
 
+if with_rust
+  unicode_width_rs = static_library(
+    'unicode_width',
+    files('unicode_width_stub.rs')
+  )
+endif
+
 if with_tests
   # DRI_CONF macros use designated initializers (required for union
   # initializaiton), so we need c++2a since gtest forces us to use c++
