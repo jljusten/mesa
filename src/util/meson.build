@@ -241,6 +241,12 @@ if with_rust
     'unicode_width',
     files('unicode_width_stub.rs')
   )
+
+  getopts_rs = static_library(
+    'getopts',
+    files('getopts_v0.2.21.rs'),
+    link_with : unicode_width_rs,
+  )
 endif
 
 if with_tests
