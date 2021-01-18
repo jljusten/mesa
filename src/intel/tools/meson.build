@@ -55,7 +55,7 @@ if with_rust
   aubinator_rs = executable(
     'aubinator_rs',
     files('aubinator.rs'),
-    link_with : getopts_rs,
+    link_with : [ libintel_dev, getopts_rs ],
     install : true,
   )
 endif

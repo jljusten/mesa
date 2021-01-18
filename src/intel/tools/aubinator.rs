@@ -2,7 +2,9 @@ extern crate getopts;
 
 use getopts::Options;
 use std::env;
+use std::ffi::CString;
 use std::io::Write;
+use std::os::raw::{c_char, c_int};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 
@@ -29,7 +31,7 @@ pub fn main()
 
 #[derive(Debug)]
 struct CmdLine {
-    gen: String,
+    gen: i32,
     headers: bool,
     color: Option<bool>,
     max_vbo_lines: Option<u64>,
@@ -41,6 +43,20 @@ struct CmdLine {
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {} [OPTION]... FILE", program);
     print!("{}", opts.usage(&brief));
+}
+
+#[link(name = "intel_dev")]
+extern "C" {
+    fn gen_device_name_to_pci_device_id(dev_name: *const c_char) -> c_int;
+}
+
+fn gen_device_name_to_pci_id(name: &str) -> i32 {
+    let c_name = CString::new(name);
+    if let Ok(c_name) = c_name {
+        unsafe { gen_device_name_to_pci_device_id(c_name.as_ptr()) }
+    } else {
+        -1
+    }
 }
 
 fn parse_options() -> Option<CmdLine> {
@@ -85,8 +101,8 @@ fn parse_options() -> Option<CmdLine> {
     }
     let gen =
         match m.opt_str("gen") {
-            Some(g) => g,
-            _ => "".to_string()
+            Some(g) => gen_device_name_to_pci_id(&g),
+            _ => -1,
         };
     let color =
         match m.opt_str("color") {
