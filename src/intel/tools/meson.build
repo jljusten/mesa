@@ -55,7 +55,8 @@ if with_rust
   aubinator_rs = executable(
     'aubinator_rs',
     files('aubinator.rs'),
-    install : true
+    link_with : getopts_rs,
+    install : true,
   )
 endif
 
