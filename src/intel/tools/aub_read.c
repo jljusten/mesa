@@ -28,6 +28,7 @@
 #include <stdarg.h>
 
 #include "common/gen_gem.h"
+#include "drm-uapi/i915_drm.h"
 #include "util/macros.h"
 
 #include "aub_read.h"

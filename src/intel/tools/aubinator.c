@@ -139,7 +139,7 @@ get_bo(void *user_data, bool ppgtt, uint64_t addr)
 }
 
 static void
-handle_execlist_write(void *user_data, enum drm_i915_gem_engine_class engine, uint64_t context_descriptor)
+handle_execlist_write(void *user_data, uint16_t engine, uint64_t context_descriptor)
 {
    const uint32_t pphwsp_size = 4096;
    uint32_t pphwsp_addr = context_descriptor & 0xfffff000;
@@ -177,8 +177,8 @@ get_legacy_bo(void *user_data, bool ppgtt, uint64_t addr)
 }
 
 static void
-handle_ring_write(void *user_data, enum drm_i915_gem_engine_class engine,
-                  const void *data, uint32_t data_len)
+handle_ring_write(void *user_data, uint16_t engine, const void *data,
+                  uint32_t data_len)
 {
    batch_ctx.user_data = &mem;
    batch_ctx.get_bo = get_legacy_bo;
