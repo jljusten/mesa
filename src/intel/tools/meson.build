@@ -52,10 +52,42 @@ aubinator_error_decode = executable(
 )
 
 if with_rust
+  rust = import('unstable-rust')
+
+  bindgen_args1 = [
+    '--impl-debug', '--with-derive-default',
+    '--whitelist-function=^aub_.*', '--whitelist-type=^aub_.*',
+  ]
+
+  bindgen_dirs = [
+     'src/intel',
+     'src',
+     'include',
+  ]
+  bindgen_args2 = [ ]
+  foreach d : bindgen_dirs
+     bindgen_args2 += [ '-I', join_paths(meson.source_root(), d) ]
+  endforeach
+
+  libaub_rs = custom_target(
+    'libaub.rs',
+     input : 'libaub.h',
+     output : 'libaub.rs',
+     command : ['bindgen'] + bindgen_args1 + ['--output=@OUTPUT@', '@INPUT@', '--'] + bindgen_args2,
+     depend_files : files('libaub.h'),
+   )
+
+  libaub_rust = static_library(
+    'aub_rs',
+    libaub_rs,
+    link_with : [libaub],
+    dependencies : [idep_mesautil],
+  )
+
   aubinator_rs = executable(
     'aubinator_rs',
     files('aubinator.rs'),
-    link_with : [ libintel_dev, getopts_rs ],
+    link_with : [ libaub_rust, libintel_dev, getopts_rs ],
     install : true,
   )
 endif
