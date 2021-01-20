@@ -59,23 +59,12 @@ if with_rust
     '--whitelist-function=^aub_.*', '--whitelist-type=^aub_.*',
   ]
 
-  bindgen_dirs = [
-     'src/intel',
-     'src',
-     'include',
-  ]
-  bindgen_args2 = [ ]
-  foreach d : bindgen_dirs
-     bindgen_args2 += [ '-I', join_paths(meson.source_root(), d) ]
-  endforeach
-
-  libaub_rs = custom_target(
-    'libaub.rs',
-     input : 'libaub.h',
-     output : 'libaub.rs',
-     command : ['bindgen'] + bindgen_args1 + ['--output=@OUTPUT@', '@INPUT@', '--'] + bindgen_args2,
-     depend_files : files('libaub.h'),
-   )
+  libaub_rs = rust.bindgen(
+    input : 'libaub.h',
+    output : 'libaub.rs',
+    include_directories : [ inc_include, inc_src, inc_intel ],
+    args : bindgen_args1,
+  )
 
   libaub_rust = static_library(
     'aub_rs',
