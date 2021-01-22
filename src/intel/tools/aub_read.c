@@ -22,10 +22,14 @@
  *
  */
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "common/gen_gem.h"
 #include "drm-uapi/i915_drm.h"
@@ -359,4 +363,77 @@ aub_read_command(struct aub_read *read, const void *data, uint32_t data_len)
    }
 
    return (next - p) * sizeof(*p);
+}
+
+struct aub_file {
+   FILE *stream;
+
+   void *map, *end, *cursor;
+};
+
+void *
+aub_reader_open(const char *filename)
+{
+   struct aub_file *file;
+   struct stat sb;
+   int fd;
+
+   file = calloc(1, sizeof *file);
+   if (file == NULL)
+      return NULL;
+
+   fd = open(filename, O_RDONLY);
+   if (fd == -1) {
+      fprintf(stderr, "open %s failed: %s\n", filename, strerror(errno));
+      return NULL;
+   }
+
+   if (fstat(fd, &sb) == -1) {
+      fprintf(stderr, "stat failed: %s\n", strerror(errno));
+      free(file);
+      return NULL;
+   }
+
+   file->map = mmap(NULL, sb.st_size,
+                    PROT_READ, MAP_SHARED, fd, 0);
+   if (file->map == MAP_FAILED) {
+      fprintf(stderr, "mmap failed: %s\n", strerror(errno));
+      free(file);
+      return NULL;
+   }
+
+   close(fd);
+
+   file->cursor = file->map;
+   file->end = file->map + sb.st_size;
+
+   return file;
+}
+
+void
+aub_reader_close(void *aub_reader)
+{
+   struct aub_file *file = (struct aub_file*)aub_reader;
+   assert(aub_reader != NULL);
+   munmap(file->map, file->end - file->map);
+   free(aub_reader);
+}
+
+static bool
+aub_reader_more(struct aub_file *file)
+{
+   return file->cursor < file->end || (file->stream && !feof(file->stream));
+}
+
+void
+aub_reader_readall(void *aub_reader, struct aub_read *aub_read)
+{
+   struct aub_file *file = (struct aub_file*)aub_reader;
+   assert(aub_reader != NULL);
+   int consumed;
+   while (aub_reader_more(aub_reader) &&
+          (consumed = aub_read_command(aub_read, file->cursor,
+                                       file->end - file->cursor)) > 0) {
+      file->cursor += consumed;
+   }
 }

@@ -28,7 +28,6 @@
 #include <getopt.h>
 
 #include <unistd.h>
-#include <fcntl.h>
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
@@ -36,7 +35,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <sys/mman.h>
 
 #include "util/macros.h"
 
@@ -189,58 +187,6 @@ handle_ring_write(void *user_data, uint16_t engine, const void *data,
    aub_mem_clear_bo_maps(&mem);
 }
 
-struct aub_file {
-   FILE *stream;
-
-   void *map, *end, *cursor;
-};
-
-static struct aub_file *
-aub_file_open(const char *filename)
-{
-   struct aub_file *file;
-   struct stat sb;
-   int fd;
-
-   file = calloc(1, sizeof *file);
-   if (file == NULL)
-      return NULL;
-
-   fd = open(filename, O_RDONLY);
-   if (fd == -1) {
-      fprintf(stderr, "open %s failed: %s\n", filename, strerror(errno));
-      free(file);
-      exit(EXIT_FAILURE);
-   }
-
-   if (fstat(fd, &sb) == -1) {
-      fprintf(stderr, "stat failed: %s\n", strerror(errno));
-      free(file);
-      exit(EXIT_FAILURE);
-   }
-
-   file->map = mmap(NULL, sb.st_size,
-                    PROT_READ, MAP_SHARED, fd, 0);
-   if (file->map == MAP_FAILED) {
-      fprintf(stderr, "mmap failed: %s\n", strerror(errno));
-      free(file);
-      exit(EXIT_FAILURE);
-   }
-
-   close(fd);
-
-   file->cursor = file->map;
-   file->end = file->map + sb.st_size;
-
-   return file;
-}
-
-static int
-aub_file_more_stuff(struct aub_file *file)
-{
-   return file->cursor < file->end || (file->stream && !feof(file->stream));
-}
-
 static void
 setup_pager(void)
 {
@@ -288,7 +234,7 @@ print_help(const char *progname, FILE *file)
 
 int main(int argc, char *argv[])
 {
-   struct aub_file *file;
+   void *aub_reader;
    int c, i;
    bool help = false, pager = true;
    const struct option aubinator_opts[] = {
@@ -363,8 +309,8 @@ int main(int argc, char *argv[])
       exit(EXIT_FAILURE);
    }
 
-   file = aub_file_open(input_file);
-   if (!file) {
+   aub_reader = aub_reader_open(input_file);
+   if (!aub_reader) {
       fprintf(stderr, "Unable to allocate buffer to open aub file\n");
       free(xml_path);
       exit(EXIT_FAILURE);
@@ -383,19 +329,14 @@ int main(int argc, char *argv[])
       .execlist_write = handle_execlist_write,
       .ring_write = handle_ring_write,
    };
-   int consumed;
-   while (aub_file_more_stuff(file) &&
-          (consumed = aub_read_command(&aub_read, file->cursor,
-                                       file->end - file->cursor)) > 0) {
-      file->cursor += consumed;
-   }
+   aub_reader_readall(aub_reader, &aub_read);
 
    aub_mem_fini(&mem);
 
    fflush(stdout);
    /* close the stdout which is opened to write the output */
    close(1);
-   free(file);
+   aub_reader_close(aub_reader);
    free(xml_path);
 
    wait(NULL);

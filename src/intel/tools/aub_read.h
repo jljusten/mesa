@@ -67,6 +67,10 @@ struct aub_read {
 
 int aub_read_command(struct aub_read *read, const void *data, uint32_t data_len);
 
+void* aub_reader_open(const char *filename);
+void aub_reader_close(void *aub_reader);
+void aub_reader_readall(void *aub_reader, struct aub_read *read);
+
 #ifdef __cplusplus
 }
 #endif
