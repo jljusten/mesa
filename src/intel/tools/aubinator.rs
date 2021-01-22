@@ -1,10 +1,11 @@
+extern crate aub_rs;
 extern crate getopts;
 
 use getopts::Options;
 use std::env;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::io::Write;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_void};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 
@@ -13,6 +14,18 @@ macro_rules! outln {
     ($($arg:tt)*) => ({
         writeln!(get_logger(), $($arg)*).unwrap();
     })
+}
+
+fn aubinator_init(user_data: *mut c_void, pci_id: i32, app_name: &str)
+{
+    outln!("App name: {}, pci-id: 0x{:04x}", app_name, pci_id);
+}
+
+#[no_mangle]
+unsafe extern "C" fn aubinator_init_c(user_data: *mut c_void, pci_id: i32, app_name: *const i8)
+{
+    let app_name = CStr::from_ptr(app_name).to_str().unwrap_or("");
+    aubinator_init(user_data, pci_id, app_name);
 }
 
 pub fn main()
@@ -26,6 +39,37 @@ pub fn main()
 
     unsafe { LOGGER = Some(Logger::new(cmd_line.disable_pager)); }
     outln!("Aubinator! I'll be back!");
+
+    let mut mem = aub_rs::aub_mem { ..Default::default() };
+    if !unsafe { aub_rs::aub_mem_init(&mut mem) } {
+        outln!("Unable to create GTT");
+        std::process::exit(-1);
+    }
+
+    let mut ar = aub_rs::aub_read {
+        user_data: &mut mem as *mut _ as *mut c_void,
+        info: Some(aubinator_init_c),
+        local_write: Some(aub_rs::aub_mem_local_write),
+        phys_write: Some(aub_rs::aub_mem_phys_write),
+        ggtt_write: Some(aub_rs::aub_mem_ggtt_write),
+        ggtt_entry_write: Some(aub_rs::aub_mem_ggtt_entry_write),
+        ..Default::default()
+    };
+    //outln!("ar: {:?}", ar);
+
+    let fname = "1.aub";
+    let c_fname = CString::new(fname).unwrap();
+    let aub_reader = unsafe { aub_rs::aub_reader_open(c_fname.as_ptr()) };
+    if !aub_reader.is_null() {
+        unsafe {
+            aub_rs::aub_reader_readall(aub_reader, &mut ar);
+            aub_rs::aub_reader_close(aub_reader);
+        }
+    } else {
+        outln!("failed to open: {}", fname);
+        std::process::exit(-1);
+    }
+
     unsafe { LOGGER = None; }
 }
 
