@@ -60,3 +60,19 @@ if with_intel_tools
     install : false
   )
 endif
+
+if with_rust
+  libinteldev_rs = rust.bindgen(
+    input : 'gen_device_info.h',
+    output : 'gen_device_info.rs',
+    include_directories : [inc_include, inc_src, inc_intel],
+    args : bindgen_common,
+  )
+
+  libinteldev_rust = static_library(
+    'inteldev_rs',
+    libinteldev_rs,
+    link_with : [libintel_dev],
+    dependencies : [idep_mesautil],
+  )
+endif

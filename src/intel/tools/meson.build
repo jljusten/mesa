@@ -52,10 +52,7 @@ aubinator_error_decode = executable(
 )
 
 if with_rust
-  rust = import('unstable-rust')
-
-  bindgen_args1 = [
-    '--impl-debug', '--with-derive-default',
+  bindgen_args1 = bindgen_common + [
     '--whitelist-function=^aub_.*', '--whitelist-type=^aub_.*',
   ]
 
@@ -76,7 +73,7 @@ if with_rust
   aubinator_rs = executable(
     'aubinator_rs',
     files('aubinator.rs'),
-    link_with : [ libaub_rust, libintel_dev, getopts_rs ],
+    link_with : [libaub_rust, libintelcommon_rust, libinteldev_rust, getopts_rs],
     install : true,
   )
 endif

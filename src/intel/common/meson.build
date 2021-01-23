@@ -116,3 +116,19 @@ if with_tests
     suite : ['intel'],
   )
 endif
+
+if with_rust
+  libintelcommon_rs = rust.bindgen(
+    input : 'libintelcommon.h',
+    output : 'libintelcommon.rs',
+    include_directories : [inc_include, inc_src, inc_intel],
+    args : bindgen_common,
+  )
+
+  libintelcommon_rust = static_library(
+    'intelcommon_rs',
+    libintelcommon_rs,
+    link_with : [libintel_common],
+    dependencies : [idep_mesautil],
+  )
+endif

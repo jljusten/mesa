@@ -46,6 +46,11 @@ else
   with_rust = false
 endif
 
+if with_rust
+  rust = import('unstable-rust')
+  bindgen_common = ['--impl-debug', '--with-derive-default',]
+endif
+
 null_dep = dependency('', required : false)
 
 if get_option('layout') != 'mirror'

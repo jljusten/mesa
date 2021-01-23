@@ -1,4 +1,6 @@
 extern crate aub_rs;
+extern crate intelcommon_rs;
+extern crate inteldev_rs;
 extern crate getopts;
 
 use getopts::Options;
@@ -19,6 +21,26 @@ macro_rules! outln {
 fn aubinator_init(user_data: *mut c_void, pci_id: i32, app_name: &str)
 {
     outln!("App name: {}, pci-id: 0x{:04x}", app_name, pci_id);
+
+    let devinfo = get_devinfo_mut() as *mut _ as *mut inteldev_rs::gen_device_info;
+    let res = unsafe { inteldev_rs::gen_get_device_info_from_pci_id(pci_id, devinfo) };
+    if !res {
+        eprintln!("can't find device information: pci_id=0x{:x}\n", pci_id);
+        std::process::exit(-1);
+    }
+
+    let mut batch_flags: gen_batch_decode_flags = 0;
+    if (option_color == COLOR_ALWAYS)
+        batch_flags |= GEN_BATCH_DECODE_IN_COLOR;
+    if (option_full_decode)
+        batch_flags |= GEN_BATCH_DECODE_FULL;
+    if (option_print_offsets)
+        batch_flags |= GEN_BATCH_DECODE_OFFSETS;
+    batch_flags |= GEN_BATCH_DECODE_FLOATS;
+
+    gen_batch_decode_ctx_init(&batch_ctx, &devinfo, outfile, batch_flags,
+                              xml_path, NULL, NULL, NULL);
+
 }
 
 #[no_mangle]
@@ -36,6 +58,10 @@ pub fn main()
     } else {
         std::process::exit(-1);
     };
+
+    unsafe {
+        DEVINFO = Some(inteldev_rs::gen_device_info { ..Default::default() } );
+    }
 
     unsafe { LOGGER = Some(Logger::new(cmd_line.disable_pager)); }
     outln!("Aubinator! I'll be back!");
@@ -89,15 +115,10 @@ fn print_usage(program: &str, opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-#[link(name = "intel_dev")]
-extern "C" {
-    fn gen_device_name_to_pci_device_id(dev_name: *const c_char) -> c_int;
-}
-
 fn gen_device_name_to_pci_id(name: &str) -> i32 {
     let c_name = CString::new(name);
     if let Ok(c_name) = c_name {
-        unsafe { gen_device_name_to_pci_device_id(c_name.as_ptr()) }
+        unsafe { inteldev_rs::gen_device_name_to_pci_device_id(c_name.as_ptr()) }
     } else {
         -1
     }
@@ -241,4 +262,14 @@ static mut LOGGER: Option<Logger> = None;
 
 fn get_logger() -> &'static mut Logger {
     unsafe { LOGGER.as_mut().unwrap() }
+}
+
+static mut DEVINFO: Option<inteldev_rs::gen_device_info> = None;
+
+fn get_devinfo_mut() -> &'static mut inteldev_rs::gen_device_info {
+    unsafe { DEVINFO.as_mut().unwrap() }
+}
+
+fn get_devinfo() -> &'static inteldev_rs::gen_device_info {
+    unsafe { DEVINFO.as_ref().unwrap() }
 }
