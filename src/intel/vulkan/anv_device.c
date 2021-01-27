@@ -313,6 +313,10 @@ anv_physical_device_init_queue_families(struct anv_physical_device *pdevice)
             .engine_class = I915_ENGINE_CLASS_RENDER,
          };
       }
+      /* Increase count below when other families are added as a reminder to
+       * increase the ANV_MAX_QUEUE_FAMILIES value.
+       */
+      STATIC_ASSERT(ANV_MAX_QUEUE_FAMILIES >= 1);
    } else {
       /* Default to a single render queue */
       pdevice->queue.families[family_count++] = (struct anv_queue_family) {
@@ -322,8 +326,10 @@ anv_physical_device_init_queue_families(struct anv_physical_device *pdevice)
          .queueCount = 1,
          .engine_class = I915_ENGINE_CLASS_RENDER,
       };
+      family_count = 1;
    }
-   pdevice->queue.family_count = 1;
+   assert(family_count <= ANV_MAX_QUEUE_FAMILIES);
+   pdevice->queue.family_count = family_count;
 }
 
 static VkResult
