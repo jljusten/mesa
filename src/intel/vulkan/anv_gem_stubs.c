@@ -252,8 +252,8 @@ anv_i915_query(int fd, uint64_t query_id, void *buffer,
    unreachable("Unused");
 }
 
-void
-anv_init_engine_info(struct anv_physical_device *device, int fd)
+struct drm_i915_query_engine_info *
+anv_gem_get_engine_info(int fd)
 {
    unreachable("Unused");
 }
