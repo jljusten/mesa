@@ -259,7 +259,8 @@ anv_init_engine_info(struct anv_physical_device *device, int fd)
 }
 
 int
-anv_gem_count_engines(struct anv_physical_device *device, uint16_t engine_class)
+anv_gem_count_engines(const struct drm_i915_query_engine_info *info,
+                      uint16_t engine_class)
 {
    unreachable("Unused");
 }
