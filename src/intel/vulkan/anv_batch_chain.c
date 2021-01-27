@@ -1850,7 +1850,7 @@ anv_queue_execbuf_locked(struct anv_queue *queue,
          .buffer_count = 1,
          .batch_start_offset = khr_perf_query_preamble_offset(query_pool,
                                                               submit->perf_query_pass),
-         .flags = I915_EXEC_HANDLE_LUT | I915_EXEC_RENDER,
+         .flags = I915_EXEC_HANDLE_LUT | queue->exec_flags,
          .rsvd1 = device->context_id,
       };
 
