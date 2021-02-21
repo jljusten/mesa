@@ -1,7 +1,7 @@
 extern crate aub_rs;
+extern crate getopts;
 extern crate intelcommon_rs;
 extern crate inteldev_rs;
-extern crate getopts;
 
 use getopts::Options;
 use std::env;
@@ -11,6 +11,8 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 
+use intelcommon_rs::*;
+
 macro_rules! outln {
     () => (write!(get_logger(), "\n").unwrap());
     ($($arg:tt)*) => ({
@@ -18,8 +20,57 @@ macro_rules! outln {
     })
 }
 
-fn aubinator_init(user_data: *mut c_void, pci_id: i32, app_name: &str)
-{
+fn handle_execlist_write(
+    user_data: *mut c_void,
+    engine: u16,
+    context_descriptor: u64,
+) {
+    outln!("handle_execlist_write called!");
+}
+
+#[no_mangle]
+unsafe extern "C" fn handle_execlist_write_c(
+    user_data: *mut c_void,
+    engine: u16,
+    context_descriptor: u64,
+) {
+    handle_execlist_write(user_data, engine, context_descriptor)
+}
+
+fn handle_ring_write(user_data: *mut c_void, engine: u16, data: *const c_void, data_len: u32) {
+    outln!("handle_ring_write called!");
+    let batch_ctx = get_batch_ctx();
+    let mut mem = get_mem();
+    batch_ctx.user_data = mem as *mut _ as *mut c_void;
+    batch_ctx.get_bo = Some(get_legacy_bo_c);
+    batch_ctx.engine = engine as i32;
+    unsafe {
+        intelcommon_rs::gen_print_batch(batch_ctx, data as *const u32, data_len, 0, false);
+        aub_rs::aub_mem_clear_bo_maps(mem);
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn handle_ring_write_c(
+    user_data: *mut c_void,
+    engine: u16,
+    data: *const c_void,
+    data_len: u32,
+) {
+    handle_ring_write(user_data, engine, data, data_len);
+}
+
+#[no_mangle]
+unsafe extern "C" fn get_legacy_bo_c(
+    user_data: *mut c_void,
+    ppgtt: bool,
+    addr: u64,
+) -> intelcommon_rs::gen_batch_decode_bo {
+    let r = aub_rs::aub_mem_get_ggtt_bo(user_data, addr);
+    std::mem::transmute::<_, intelcommon_rs::gen_batch_decode_bo>(r)
+}
+
+fn aubinator_init(user_data: *mut c_void, pci_id: i32, app_name: &str) {
     outln!("App name: {}, pci-id: 0x{:04x}", app_name, pci_id);
 
     let devinfo = get_devinfo_mut() as *mut _ as *mut inteldev_rs::gen_device_info;
@@ -29,29 +80,46 @@ fn aubinator_init(user_data: *mut c_void, pci_id: i32, app_name: &str)
         std::process::exit(-1);
     }
 
+    let options = get_options();
     let mut batch_flags: gen_batch_decode_flags = 0;
-    if (option_color == COLOR_ALWAYS)
-        batch_flags |= GEN_BATCH_DECODE_IN_COLOR;
-    if (option_full_decode)
-        batch_flags |= GEN_BATCH_DECODE_FULL;
-    if (option_print_offsets)
-        batch_flags |= GEN_BATCH_DECODE_OFFSETS;
-    batch_flags |= GEN_BATCH_DECODE_FLOATS;
+    if options.color != Some(false) {
+        batch_flags |= gen_batch_decode_flags_GEN_BATCH_DECODE_IN_COLOR;
+    }
+    if !options.headers {
+        batch_flags |= gen_batch_decode_flags_GEN_BATCH_DECODE_FULL;
+    }
+    if !options.no_offsets {
+        batch_flags |= gen_batch_decode_flags_GEN_BATCH_DECODE_OFFSETS;
+    }
 
-    gen_batch_decode_ctx_init(&batch_ctx, &devinfo, outfile, batch_flags,
-                              xml_path, NULL, NULL, NULL);
+    let devinfo = get_devinfo() as *const _ as *const intelcommon_rs::gen_device_info;
+    let xml_dir = if let Some(x) = &options.xml_dir {
+        x.as_ptr() as *const _ as *const i8
+    } else {
+        std::ptr::null()
+    };
 
+    unsafe {
+        gen_batch_decode_ctx_init(
+            get_batch_ctx(),
+            devinfo,
+            stdout,
+            batch_flags,
+            xml_dir,
+            None,
+            None,
+            std::ptr::null_mut() as *mut _ as *mut c_void,
+        );
+    }
 }
 
 #[no_mangle]
-unsafe extern "C" fn aubinator_init_c(user_data: *mut c_void, pci_id: i32, app_name: *const i8)
-{
+unsafe extern "C" fn aubinator_init_c(user_data: *mut c_void, pci_id: i32, app_name: *const i8) {
     let app_name = CStr::from_ptr(app_name).to_str().unwrap_or("");
     aubinator_init(user_data, pci_id, app_name);
 }
 
-pub fn main()
-{
+pub fn main() {
     let cmd_line = parse_options();
     let cmd_line = if let Some(c) = cmd_line {
         c
@@ -60,28 +128,47 @@ pub fn main()
     };
 
     unsafe {
-        DEVINFO = Some(inteldev_rs::gen_device_info { ..Default::default() } );
+        OPTIONS = Some(cmd_line);
     }
 
-    unsafe { LOGGER = Some(Logger::new(cmd_line.disable_pager)); }
+    unsafe {
+        DEVINFO = Some(inteldev_rs::gen_device_info {
+            ..Default::default()
+        });
+    }
+
+    unsafe {
+        BATCH_CTX = Some(gen_batch_decode_ctx {
+            ..Default::default()
+        });
+    }
+
+    unsafe {
+        LOGGER = Some(Logger::new(get_options().disable_pager));
+    }
     outln!("Aubinator! I'll be back!");
 
-    let mut mem = aub_rs::aub_mem { ..Default::default() };
-    if !unsafe { aub_rs::aub_mem_init(&mut mem) } {
+    unsafe {
+        MEM = Some(aub_rs::aub_mem {
+            ..Default::default()
+        });
+    }
+    if !unsafe { aub_rs::aub_mem_init(get_mem()) } {
         outln!("Unable to create GTT");
         std::process::exit(-1);
     }
 
     let mut ar = aub_rs::aub_read {
-        user_data: &mut mem as *mut _ as *mut c_void,
+        user_data: get_mem() as *mut _ as *mut c_void,
         info: Some(aubinator_init_c),
         local_write: Some(aub_rs::aub_mem_local_write),
         phys_write: Some(aub_rs::aub_mem_phys_write),
         ggtt_write: Some(aub_rs::aub_mem_ggtt_write),
         ggtt_entry_write: Some(aub_rs::aub_mem_ggtt_entry_write),
+        execlist_write: Some(handle_execlist_write_c),
+        ring_write: Some(handle_ring_write_c),
         ..Default::default()
     };
-    //outln!("ar: {:?}", ar);
 
     let fname = "1.aub";
     let c_fname = CString::new(fname).unwrap();
@@ -96,7 +183,9 @@ pub fn main()
         std::process::exit(-1);
     }
 
-    unsafe { LOGGER = None; }
+    unsafe {
+        LOGGER = None;
+    }
 }
 
 #[derive(Debug)]
@@ -164,40 +253,35 @@ fn parse_options() -> Option<CmdLine> {
     if m.opt_present("h") {
         help = true;
     }
-    let gen =
-        match m.opt_str("gen") {
-            Some(g) => gen_device_name_to_pci_id(&g),
-            _ => -1,
-        };
-    let color =
-        match m.opt_str("color") {
-            Some(clr) => {
-                match clr.as_str() {
-                    "auto" => None,
-                    "always" => Some(true),
-                    "never" => Some(false),
-                    _ => {
-                        help = true;
-                        None
-                    },
+    let gen = match m.opt_str("gen") {
+        Some(g) => gen_device_name_to_pci_id(&g),
+        _ => -1,
+    };
+    let color = match m.opt_str("color") {
+        Some(clr) => match clr.as_str() {
+            "auto" => None,
+            "always" => Some(true),
+            "never" => Some(false),
+            _ => {
+                help = true;
+                None
+            }
+        },
+        _ => None,
+    };
+    let max_vbo_lines = match m.opt_str("max-vbo-lines") {
+        Some(m) => {
+            let m = u64::from_str(m.as_str());
+            match m {
+                Ok(m) => Some(m),
+                _ => {
+                    help = true;
+                    None
                 }
-            },
-            _ => None
-        };
-    let max_vbo_lines =
-        match m.opt_str("max-vbo-lines") {
-            Some(m) => {
-                let m = u64::from_str(m.as_str());
-                match m {
-                    Ok(m) => Some(m),
-                    _ => {
-                        help = true;
-                        None
-                    },
-                }
-            },
-            _ => None
-        };
+            }
+        }
+        _ => None,
+    };
     let xml_dir = m.opt_str("xml");
     if help {
         print_usage(&program, opts);
@@ -206,13 +290,14 @@ fn parse_options() -> Option<CmdLine> {
     let headers = !help && m.opt_present("headers");
     let disable_pager = !help && m.opt_present("no-pager");
     let no_offsets = !help && m.opt_present("no-offsets");
-    Some(CmdLine { gen,
-                   headers,
-                   color,
-                   max_vbo_lines,
-                   disable_pager,
-                   no_offsets,
-                   xml_dir,
+    Some(CmdLine {
+        gen,
+        headers,
+        color,
+        max_vbo_lines,
+        disable_pager,
+        no_offsets,
+        xml_dir,
     })
 }
 
@@ -225,14 +310,16 @@ impl Logger {
         let pager = if disable_pager {
             None
         } else {
-            Some(Command::new("less")
-                .arg("-FRSi")
-                .stdin(Stdio::piped())
-                .spawn()
-                .expect("Failed to execute pager!"))
+            Some(
+                Command::new("less")
+                    .arg("-FRSi")
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .expect("Failed to execute pager!"),
+            )
         };
 
-        Logger { pager}
+        Logger { pager }
     }
 
     fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> std::io::Result<()> {
@@ -240,7 +327,7 @@ impl Logger {
             Some(p) => {
                 let dst = p.stdin.as_mut().expect("Failed to open stdin");
                 dst.write_fmt(fmt)
-            },
+            }
             _ => {
                 let dst = std::io::stdout();
                 let mut dst = dst.lock();
@@ -253,9 +340,16 @@ impl Logger {
 impl Drop for Logger {
     fn drop(&mut self) {
         if let Some(p) = &mut self.pager {
-            p.wait().expect("Could not wait for pager process to finish!");
+            p.wait()
+                .expect("Could not wait for pager process to finish!");
         }
     }
+}
+
+static mut OPTIONS: Option<CmdLine> = None;
+
+fn get_options() -> &'static CmdLine {
+    unsafe { OPTIONS.as_ref().unwrap() }
 }
 
 static mut LOGGER: Option<Logger> = None;
@@ -272,4 +366,16 @@ fn get_devinfo_mut() -> &'static mut inteldev_rs::gen_device_info {
 
 fn get_devinfo() -> &'static inteldev_rs::gen_device_info {
     unsafe { DEVINFO.as_ref().unwrap() }
+}
+
+static mut BATCH_CTX: Option<gen_batch_decode_ctx> = None;
+
+fn get_batch_ctx() -> &'static mut gen_batch_decode_ctx {
+    unsafe { BATCH_CTX.as_mut().unwrap() }
+}
+
+static mut MEM: Option<aub_rs::aub_mem> = None;
+
+fn get_mem() -> &'static mut aub_rs::aub_mem {
+    unsafe { MEM.as_mut().unwrap() }
 }
