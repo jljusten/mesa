@@ -32,6 +32,7 @@ project(
 cc = meson.get_compiler('c')
 cpp = meson.get_compiler('cpp')
 
+rust_args = []
 _rust = get_option('rust-lang')
 if _rust != 'false'
   _rustc = find_program('rustc', required : _rust == 'true')
@@ -1933,6 +1934,12 @@ endforeach
 foreach a : cpp_args
   add_project_arguments(a, language : ['cpp'])
 endforeach
+
+if with_rust
+  foreach a : rust_args
+    add_project_arguments(a, language : ['rust'])
+  endforeach
+endif
 
 gl_priv_reqs = []
 
