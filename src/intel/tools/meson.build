@@ -75,11 +75,10 @@ if with_rust
     files('aubinator.rs'),
     link_with : [libaub_rust, libintelcommon_rust, libinteldev_rust, getopts_rs,
                  libintel_common, libisl, libintel_compiler],
-    dependencies : [dep_expat, idep_mesautil, dep_zlib],
     install : true,
 
     # Hack for link
-    rust_args : ['-l', 'static=expat', '-l', 'static=z'],
+    #rust_args : ['-l', 'static=expat', '-l', 'static=z'],
   )
 endif
 
