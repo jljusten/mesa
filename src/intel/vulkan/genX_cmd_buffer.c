@@ -1955,6 +1955,14 @@ genX(cmd_buffer_apply_pipe_flushes)(struct anv_cmd_buffer *cmd_buffer)
    else if (bits == 0)
       return;
 
+#if GEN_VERSIONx10 == 120
+   /* This bits means a stall to rewrite a register. */
+   if (bits & ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED)
+      bits |= ANV_PIPE_STALL_AT_SCOREBOARD_BIT;
+#else
+   assert((bits & ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED) == 0);
+#endif
+
    /*
     * From Sandybridge PRM, volume 2, "1.7.2 End-of-Pipe Synchronization":
     *
@@ -2238,6 +2246,16 @@ genX(cmd_buffer_apply_pipe_flushes)(struct anv_cmd_buffer *cmd_buffer)
 
       bits &= ~ANV_PIPE_INVALIDATE_BITS;
    }
+
+#if GEN_VERSIONx10 == 120
+   if (bits & ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED) {
+      anv_batch_write_reg(&cmd_buffer->batch, GENX(COMMON_SLICE_CHICKEN1), csc1) {
+         csc1.RCCRHWOOptimizationDisableBit = true;
+         csc1.RCCRHWOOptimizationDisableBitMask = true;
+      }
+      bits &= ~ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED;
+   }
+#endif
 
    cmd_buffer->state.pending_pipe_bits = bits;
 }

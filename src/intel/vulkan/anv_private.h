@@ -2362,6 +2362,10 @@ enum anv_pipe_bits {
     * implement a workaround for Gen9.
     */
    ANV_PIPE_POST_SYNC_BIT                    = (1 << 25),
+
+   /* This bit is only useful to implement Wa_1508744258 on Gfx12.
+    */
+   ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED     = (1 << 26),
 };
 
 #define ANV_PIPE_FLUSH_BITS ( \

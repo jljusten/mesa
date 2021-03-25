@@ -229,6 +229,27 @@ genX(blorp_exec)(struct blorp_batch *batch,
    genX(cmd_buffer_emit_hashing_mode)(cmd_buffer, params->x1 - params->x0,
                                       params->y1 - params->y0, scale);
 
+#if GEN_VERSIONx10 == 120
+   /* To implement Wa_1508744258 on Gfx12, we have to update a register.
+    * Unfortunately this is not pipelined, meaning we need to stall the
+    * pipeline before updating the value. In the case we have 2 back to back
+    * resolve operations though, don't add unecessary flushes in the pipeline
+    * to implement Wa_1508744258.
+    */
+   bool rcc_rhw_opt_enabled =
+      (params->fast_clear_op == ISL_AUX_OP_PARTIAL_RESOLVE ||
+       params->fast_clear_op == ISL_AUX_OP_FULL_RESOLVE),
+      rcc_rhw_opt_enable = false;
+   if (rcc_rhw_opt_enabled) {
+      if (cmd_buffer->state.pending_pipe_bits & ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED) {
+         cmd_buffer->state.pending_pipe_bits &= ~ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED;
+      } else {
+         cmd_buffer->state.pending_pipe_bits |= ANV_PIPE_STALL_AT_SCOREBOARD_BIT;
+         rcc_rhw_opt_enable = true;
+      }
+   }
+#endif
+
 #if GEN_GEN >= 11
    /* The PIPE_CONTROL command description says:
     *
@@ -264,6 +285,23 @@ genX(blorp_exec)(struct blorp_batch *batch,
     */
    genX(cmd_buffer_enable_pma_fix)(cmd_buffer, false);
 
+#if GEN_VERSIONx10 == 120
+   /* Wa_1508744258: Reenable optimization to avoid hang during resolve
+    * operations.
+    */
+   if (rcc_rhw_opt_enable) {
+      blorp_emit(batch, GENX(MI_LOAD_REGISTER_IMM), lri) {
+         struct GENX(COMMON_SLICE_CHICKEN1) csc1 = {
+            .RCCRHWOOptimizationDisableBit = false,
+            .RCCRHWOOptimizationDisableBitMask = true,
+         };
+
+         lri.RegisterOffset = GENX(COMMON_SLICE_CHICKEN1_num);
+         GENX(COMMON_SLICE_CHICKEN1_pack)(NULL, &lri.DataDWord, &csc1);
+      }
+   }
+#endif
+
    blorp_exec(batch, params);
 
 #if GEN_GEN >= 11
@@ -276,6 +314,9 @@ genX(blorp_exec)(struct blorp_batch *batch,
     *     be set in this packet."
     */
    cmd_buffer->state.pending_pipe_bits |=
+#if GEN_VERSIONx10 == 120
+      (rcc_rhw_opt_enabled ? ANV_PIPE_RCC_RHW_OPTIMIZATION_ENABLED : 0) |
+#endif
       ANV_PIPE_RENDER_TARGET_CACHE_FLUSH_BIT |
       ANV_PIPE_STALL_AT_SCOREBOARD_BIT;
 #endif

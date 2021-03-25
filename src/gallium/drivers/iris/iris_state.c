@@ -966,6 +966,14 @@ iris_init_common_context(struct iris_batch *batch)
       reg.EnabledTexelOffsetPrecisionFixMask = 1;
    }
 #endif
+
+#if GEN_VERSIONx10 == 120
+   /* Wa_1508744258 */
+   iris_emit_reg(batch, GENX(COMMON_SLICE_CHICKEN1), csc1) {
+      csc1.RCCRHWOOptimizationDisableBit = true;
+      csc1.RCCRHWOOptimizationDisableBitMask = true;
+   }
+#endif
 }
 
 /**
@@ -1082,7 +1090,6 @@ iris_init_render_context(struct iris_batch *batch)
    iris_emit_cmd(batch, GENX(3DSTATE_POLY_STIPPLE_OFFSET), foo);
 
    iris_alloc_push_constants(batch);
-
 
 #if GEN_GEN >= 12
    init_aux_map_state(batch);
