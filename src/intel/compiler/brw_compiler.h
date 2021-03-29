@@ -1663,6 +1663,9 @@ struct brw_compile_cs_params {
    void *log_data;
 
    char *error_str;
+
+   /* If unset, DEBUG_CS is used. */
+   uint64_t debug_flag;
 };
 
 /**

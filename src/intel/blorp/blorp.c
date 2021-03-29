@@ -315,6 +315,7 @@ blorp_compile_cs(struct blorp_context *blorp, void *mem_ctx,
       .key = cs_key,
       .prog_data = cs_prog_data,
       .log_data = blorp->driver_ctx,
+      .debug_flag = DEBUG_BLORP,
    };
 
    const unsigned *program = brw_compile_cs(compiler, mem_ctx, &params);
