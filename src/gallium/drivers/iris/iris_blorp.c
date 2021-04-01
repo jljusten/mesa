@@ -45,6 +45,26 @@
 
 #include "blorp/blorp_genX_exec.h"
 
+#define __genxml_cmd_length(cmd) cmd ## _length
+#define __genxml_cmd_length_bias(cmd) cmd ## _length_bias
+#define __genxml_cmd_header(cmd) cmd ## _header
+#define __genxml_cmd_pack(cmd) cmd ## _pack
+#define __genxml_reg_num(cmd) cmd ## _num
+
+#define iris_blorp_emit_reg(batch, reg, name)                           \
+   for (struct reg name = {}, *_cont = (struct reg *)1; _cont != NULL;  \
+        ({                                                              \
+            uint32_t _dw[__genxml_cmd_length(reg)];                     \
+            __genxml_cmd_pack(reg)(NULL, _dw, &name);                   \
+            for (unsigned i = 0; i < __genxml_cmd_length(reg); i++) {   \
+               blorp_emit(batch, GENX(MI_LOAD_REGISTER_IMM), lri) {  \
+                  lri.RegisterOffset   = __genxml_reg_num(reg);         \
+                  lri.DataDWord        = _dw[i];                        \
+               }                                                        \
+            }                                                           \
+           _cont = NULL;                                                \
+         }))
+
 static uint32_t *
 stream_state(struct iris_batch *batch,
              struct u_upload_mgr *uploader,
@@ -274,6 +294,21 @@ iris_blorp_exec(struct blorp_batch *blorp_batch,
                                 PIPE_CONTROL_STALL_AT_SCOREBOARD);
 #endif
 
+#if GEN_VERSIONx10 == 120
+   bool rcc_rhw_opt_enable =
+      (params->fast_clear_op == ISL_AUX_OP_PARTIAL_RESOLVE ||
+       params->fast_clear_op == ISL_AUX_OP_FULL_RESOLVE);
+   /* Wa_1508744258: Reenable optimization to avoid hang during resolve
+    * operations.
+    */
+   if (rcc_rhw_opt_enable) {
+      iris_blorp_emit_reg(blorp_batch, GENX(COMMON_SLICE_CHICKEN1), csc1) {
+         csc1.RCCRHWOOptimizationDisableBit = false;
+         csc1.RCCRHWOOptimizationDisableBitMask = true;
+      }
+   }
+#endif
+
    /* Flush the render cache in cases where the same surface is reinterpreted
     * with a different format, which blorp does for stencil and depth data
     * among other things.  Invalidation of sampler caches and flushing of any
@@ -375,6 +410,18 @@ iris_blorp_exec(struct blorp_batch *blorp_batch,
    if (params->stencil.enabled)
       iris_bo_bump_seqno(params->stencil.addr.buffer, batch->next_seqno,
                          IRIS_DOMAIN_DEPTH_WRITE);
+
+#if GEN_VERSIONx10 == 120
+   /* Wa_1508744258: Redisable optimization for Wa_22011054531. */
+   if (rcc_rhw_opt_enable) {
+      iris_emit_end_of_pipe_sync(batch, "workaround: flush to redisable RHWO [blorp]",
+                                 PIPE_CONTROL_WRITE_IMMEDIATE);
+      iris_blorp_emit_reg(blorp_batch, GENX(COMMON_SLICE_CHICKEN1), csc1) {
+         csc1.RCCRHWOOptimizationDisableBit = true;
+         csc1.RCCRHWOOptimizationDisableBitMask = true;
+      }
+   }
+#endif
 }
 
 static void
