@@ -1623,6 +1623,54 @@ fs_visitor::assign_curb_setup()
 
    uint64_t used = 0;
 
+
+   if (stage == MESA_SHADER_COMPUTE && ubo_push_length > 0) {
+      fs_builder ubld = bld.exec_all().group(8, 0).at(
+         cfg->first_block(), cfg->first_block()->start());
+
+      fs_reg header0 = ubld.vgrf(BRW_REGISTER_TYPE_UD);
+      ubld.MOV(header0, brw_imm_ud(0));
+
+      for (int i = 0; i < 4; i++) {
+         struct brw_ubo_range *range = &prog_data->ubo_ranges[i];
+         if (range->length == 0)
+            continue;
+
+         fprintf(stderr, "ubo push range: 0x%x, 0x%x, 0x%x\n", range->block,
+                 range->start, range->length);
+
+         for (int j = 0; j < range->length;) {
+            fs_reg srcs[3] = {
+               brw_imm_ud(0), /* desc */
+               brw_imm_ud(0), /* ex_desc */
+               header0, /* payload */
+            };
+            fs_reg dest = retype(brw_vec8_grf((ubo_push_start[i] / 8) + j + 1, 0),
+                                 BRW_REGISTER_TYPE_UD);
+            const unsigned num_regs = 1;
+            unsigned send_width = MIN2(16, num_regs * 8);
+            fs_inst *send = ubld.group(send_width, 0).emit(SHADER_OPCODE_SEND,
+                                                           dest, srcs, 3);
+            send->sfid = GFX7_SFID_DATAPORT_DATA_CACHE;
+            //send->sfid = HSW_SFID_DATAPORT_DATA_CACHE_1;
+            const unsigned surf_index =
+               stage_prog_data->binding_table.ubo_start + range->block;
+            send->desc = brw_dp_read_desc(devinfo, surf_index,
+                                          BRW_DATAPORT_OWORD_BLOCK_OWORDS(num_regs * 2),
+                                          GFX7_DATAPORT_DC_OWORD_BLOCK_READ,
+                                          BRW_DATAPORT_READ_TARGET_DATA_CACHE);
+            send->header_size = 1;
+            send->mlen = 1;
+            send->size_written = num_regs * REG_SIZE;
+            send->send_is_volatile = true;
+
+            j += num_regs;
+         }
+      }
+
+      invalidate_analysis(DEPENDENCY_INSTRUCTIONS);
+   }
+
    if (stage == MESA_SHADER_COMPUTE && devinfo->verx10 >= 125) {
       fs_builder ubld = bld.exec_all().group(8, 0).at(
          cfg->first_block(), cfg->first_block()->start());

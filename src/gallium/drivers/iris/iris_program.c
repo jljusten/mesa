@@ -2051,6 +2051,8 @@ iris_compile_cs(struct iris_screen *screen,
 
    struct brw_cs_prog_key brw_key = iris_to_brw_cs_key(devinfo, key);
 
+   brw_nir_analyze_ubo_ranges(compiler, nir, NULL, prog_data->ubo_ranges);
+
    struct brw_compile_cs_params params = {
       .nir = nir,
       .key = &brw_key,
