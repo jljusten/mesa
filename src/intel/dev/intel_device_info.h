@@ -493,7 +493,7 @@ intel_device_info_timebase_scale(const struct intel_device_info *devinfo,
 static inline bool
 intel_vram_all_mappable(const struct intel_device_info *devinfo)
 {
-   return devinfo->regions.vram.unmappable.size == 0;
+   return devinfo->mem.vram.unmappable.size == 0;
 }
 
 bool intel_get_device_info_from_fd(int fh, struct intel_device_info *devinfo);

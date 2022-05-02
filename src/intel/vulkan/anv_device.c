@@ -377,11 +377,18 @@ anv_init_meminfo(struct anv_physical_device *device, int fd)
       anv_compute_sys_heap_size(device, devinfo->mem.sram.mappable.size);
    device->sys.available = devinfo->mem.sram.mappable.free;
 
-   device->vram.region.memory_class = devinfo->mem.vram.mem_class;
-   device->vram.region.memory_instance =
+   device->vram_mappable.region.memory_class = devinfo->mem.vram.mem_class;
+   device->vram_mappable.region.memory_instance =
       devinfo->mem.vram.mem_instance;
-   device->vram.size = devinfo->mem.vram.mappable.size;
-   device->vram.available = devinfo->mem.vram.mappable.free;
+   device->vram_mappable.size = devinfo->mem.vram.mappable.size;
+   device->vram_mappable.available = devinfo->mem.vram.mappable.free;
+
+   device->vram_non_mappable.region.memory_class =
+      devinfo->mem.vram.mem_class;
+   device->vram_non_mappable.region.memory_instance =
+      devinfo->mem.vram.mem_instance;
+   device->vram_non_mappable.size = devinfo->mem.vram.unmappable.size;
+   device->vram_non_mappable.available = devinfo->mem.vram.unmappable.free;
 
    return VK_SUCCESS;
 }
@@ -394,7 +401,8 @@ anv_update_meminfo(struct anv_physical_device *device, int fd)
 
    const struct intel_device_info *devinfo = &device->info;
    device->sys.available = devinfo->mem.sram.mappable.free;
-   device->vram.available = devinfo->mem.vram.mappable.free;
+   device->vram_mappable.available = devinfo->mem.vram.mappable.free;
+   device->vram_non_mappable.available = devinfo->mem.vram.unmappable.free;
 }
 
 
@@ -407,13 +415,19 @@ anv_physical_device_init_heaps(struct anv_physical_device *device, int fd)
 
    assert(device->sys.size != 0);
 
-   if (device->vram.size > 0) {
-      /* We can create 2 different heaps when we have local memory support,
-       * first heap with local memory size and second with system memory size.
+   if (anv_physical_device_has_vram(device)) {
+      /* We can create 2 or 3 different heaps when we have local memory
+       * support, first heap with local memory size and second with system
+       * memory size and the third is added only if part of the vram is
+       * mappable to the host.
        */
       device->memory.heap_count = 2;
       device->memory.heaps[0] = (struct anv_memory_heap) {
-         .size = device->vram.size,
+         /* If there is a vram_non_mappable, use that for the device only
+          * heap. Otherwise use the vram_mappable.
+          */
+         .size = device->vram_non_mappable.size != 0 ?
+                 device->vram_non_mappable.size : device->vram_mappable.size,
          .flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
          .is_local_mem = true,
       };
@@ -422,6 +436,17 @@ anv_physical_device_init_heaps(struct anv_physical_device *device, int fd)
          .flags = 0,
          .is_local_mem = false,
       };
+      /* Add an additional smaller vram mappable heap if we can't map all the
+       * vram to the host.
+       */
+      if (device->vram_non_mappable.size > 0) {
+         device->memory.heap_count++;
+         device->memory.heaps[2] = (struct anv_memory_heap) {
+            .size = device->vram_mappable.size,
+            .flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT,
+            .is_local_mem = true,
+         };
+      }
 
       device->memory.type_count = 3;
       device->memory.types[0] = (struct anv_memory_type) {
@@ -438,7 +463,11 @@ anv_physical_device_init_heaps(struct anv_physical_device *device, int fd)
          .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-         .heapIndex = 0,
+         /* This memory type either comes from heaps[0] if there is only
+          * mappable vram region, or from heaps[2] if there is both mappable &
+          * non-mappable vram regions.
+          */
+         .heapIndex = device->vram_non_mappable.size > 0 ? 2 : 0,
       };
    } else if (device->info.has_llc) {
       device->memory.heap_count = 1;
@@ -842,7 +871,8 @@ anv_physical_device_try_create(struct anv_instance *instance,
                                       device->gtt_size > (4ULL << 30 /* GiB */);
 
    /* Initialize memory regions struct to 0. */
-   memset(&device->vram, 0, sizeof(device->vram));
+   memset(&device->vram_non_mappable, 0, sizeof(device->vram_non_mappable));
+   memset(&device->vram_mappable, 0, sizeof(device->vram_mappable));
    memset(&device->sys, 0, sizeof(device->sys));
 
    result = anv_physical_device_init_heaps(device, fd);
@@ -2735,7 +2765,7 @@ anv_get_memory_budget(VkPhysicalDevice physicalDevice,
 
       if (device->memory.heaps[i].is_local_mem) {
          total_heaps_size = total_vram_heaps_size;
-         mem_available = device->vram.available;
+         mem_available = device->vram_non_mappable.available;
       } else {
          total_heaps_size = total_sys_heaps_size;
          mem_available = device->sys.available;
@@ -3825,6 +3855,16 @@ VkResult anv_AllocateMemory(
    if (device->physical->has_implicit_ccs && device->info.has_aux_map)
       alloc_flags |= ANV_BO_ALLOC_IMPLICIT_CCS;
 
+   /* If i915 reported a mappable/non_mappable vram regions and the
+    * application want lmem mappable, then we need to use the
+    * I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS flag to create our BO.
+    */
+   if (pdevice->vram_mappable.size > 0 &&
+       pdevice->vram_non_mappable.size > 0 &&
+       (mem_type->propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
+       (mem_type->propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+      alloc_flags |= ANV_BO_ALLOC_LOCAL_MEM_CPU_VISIBLE;
+
    if (vk_flags & VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT_KHR)
       alloc_flags |= ANV_BO_ALLOC_CLIENT_VISIBLE_ADDRESS;
 
@@ -4763,9 +4803,9 @@ vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t* pSupportedVersion)
     *
     *    - Loader interface v4 differs from v3 in:
     *        - The ICD must implement vk_icdGetPhysicalDeviceProcAddr().
-    * 
+    *
     *    - Loader interface v5 differs from v4 in:
-    *        - The ICD must support Vulkan API version 1.1 and must not return 
+    *        - The ICD must support Vulkan API version 1.1 and must not return
     *          VK_ERROR_INCOMPATIBLE_DRIVER from vkCreateInstance() unless a
     *          Vulkan Loader with interface v4 or smaller is being used and the
     *          application provides an API version that is greater than 1.0.
