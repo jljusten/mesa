@@ -1707,13 +1707,16 @@ anv_device_alloc_bo(struct anv_device *device,
          regions[nregions++] = device->physical->sys.region;
       }
 
-      /* TODO: Add I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS to flags for
-       * after small BAR uapi is stabilized.
-       */
-      assert(intel_vram_all_mappable(&device->info));
+      uint32_t flags = 0;
+      if (alloc_flags & ANV_BO_ALLOC_LOCAL_MEM_CPU_VISIBLE) {
+         assert(alloc_flags & ANV_BO_ALLOC_LOCAL_MEM);
+         /* We're required to add smem as a region when using mappable vram. */
+         regions[nregions++] = device->physical->sys.region;
+         flags |= I915_GEM_CREATE_EXT_FLAG_NEEDS_CPU_ACCESS;
+      }
 
       gem_handle = anv_gem_create_regions(device, size + ccs_size,
-                                          0 /* flags */, nregions, regions);
+                                          flags, nregions, regions);
    } else {
       gem_handle = anv_gem_create(device, size + ccs_size);
    }
