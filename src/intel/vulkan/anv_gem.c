@@ -66,7 +66,7 @@ anv_gem_close(struct anv_device *device, uint32_t gem_handle)
 
 uint32_t
 anv_gem_create_regions(struct anv_device *device, uint64_t anv_bo_size,
-                       uint32_t num_regions,
+                       uint32_t flags, uint32_t num_regions,
                        struct drm_i915_gem_memory_class_instance *regions)
 {
    struct drm_i915_gem_create_ext_memory_regions ext_regions = {
@@ -78,6 +78,7 @@ anv_gem_create_regions(struct anv_device *device, uint64_t anv_bo_size,
    struct drm_i915_gem_create_ext gem_create = {
       .size = anv_bo_size,
       .extensions = (uintptr_t) &ext_regions,
+      .flags = flags,
    };
 
    int ret = intel_ioctl(device->fd, DRM_IOCTL_I915_GEM_CREATE_EXT,

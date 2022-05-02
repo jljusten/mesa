@@ -1696,12 +1696,13 @@ anv_device_alloc_bo(struct anv_device *device,
    /* If we have vram size, we have multiple memory regions and should choose
     * one of them.
     */
-   if (device->physical->vram.size > 0) {
+   if (anv_physical_device_has_vram(device->physical)) {
       struct drm_i915_gem_memory_class_instance regions[2];
       uint32_t nregions = 0;
 
       if (alloc_flags & ANV_BO_ALLOC_LOCAL_MEM) {
-         regions[nregions++] = device->physical->vram.region;
+         /* vram_non_mappable & vram_mappable actually are the same region. */
+         regions[nregions++] = device->physical->vram_non_mappable.region;
       } else {
          regions[nregions++] = device->physical->sys.region;
       }
@@ -1712,7 +1713,7 @@ anv_device_alloc_bo(struct anv_device *device,
       assert(intel_vram_all_mappable(&device->info));
 
       gem_handle = anv_gem_create_regions(device, size + ccs_size,
-                                          nregions, regions);
+                                          0 /* flags */, nregions, regions);
    } else {
       gem_handle = anv_gem_create(device, size + ccs_size);
    }
