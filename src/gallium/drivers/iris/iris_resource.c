@@ -825,8 +825,8 @@ iris_resource_configure_aux(struct iris_screen *screen,
       } else if (isl_surf_usage_is_stencil(res->surf.usage)) {
          res->aux.usage = ISL_AUX_USAGE_STC_CCS;
       } else if (want_ccs_e_for_format(devinfo, res->surf.format)) {
-         res->aux.usage = devinfo->ver < 12 ?
-            ISL_AUX_USAGE_CCS_E : ISL_AUX_USAGE_GFX12_CCS_E;
+         res->aux.usage = devinfo->verx10 == 120 ?
+            ISL_AUX_USAGE_GFX12_CCS_E : ISL_AUX_USAGE_CCS_E;
       } else {
          assert(isl_format_supports_ccs_d(devinfo, res->surf.format));
          res->aux.usage = ISL_AUX_USAGE_CCS_D;

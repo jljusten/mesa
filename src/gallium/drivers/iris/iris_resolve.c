@@ -958,9 +958,11 @@ iris_image_view_aux_usage(struct iris_context *ice,
    /* On GFX12, compressed surfaces supports non-atomic operations. GFX12HP and
     * further, add support for all the operations.
     */
-   if (aux_usage == ISL_AUX_USAGE_GFX12_CCS_E &&
+   if (devinfo->ver >= 12 &&
+       (aux_usage == ISL_AUX_USAGE_CCS_E ||
+        aux_usage == ISL_AUX_USAGE_GFX12_CCS_E) &&
        (devinfo->verx10 >= 125 || !uses_atomic_load_store))
-      return ISL_AUX_USAGE_GFX12_CCS_E;
+      return aux_usage;
 
    return ISL_AUX_USAGE_NONE;
 }

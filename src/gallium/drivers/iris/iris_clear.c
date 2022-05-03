@@ -72,6 +72,8 @@ can_fast_clear_color(struct iris_context *ice,
                      enum isl_format render_format,
                      union isl_color_value color)
 {
+   struct iris_screen *screen = (void *) ice->ctx.screen;
+   const struct intel_device_info *devinfo = &screen->devinfo;
    struct iris_resource *res = (void *) p_res;
 
    if (INTEL_DEBUG(DEBUG_NO_FAST_CLEAR))
@@ -133,8 +135,10 @@ can_fast_clear_color(struct iris_context *ice,
     * elements. Assuming LOD2 exists, don't fast-clear any level above LOD0
     * to avoid stomping on other LODs.
     */
-   if (level > 0 && util_format_get_blocksizebits(p_res->format) == 8 &&
-       res->aux.usage == ISL_AUX_USAGE_GFX12_CCS_E && p_res->width0 % 64) {
+   if (devinfo->ver >= 12 && level > 0 && p_res->width0 % 64 &&
+       util_format_get_blocksizebits(p_res->format) == 8 &&
+       (res->aux.usage == ISL_AUX_USAGE_GFX12_CCS_E ||
+        res->aux.usage == ISL_AUX_USAGE_CCS_E)) {
       return false;
    }
 
