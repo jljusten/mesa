@@ -146,6 +146,11 @@ modifier_is_supported(const struct intel_device_info *devinfo,
       if (INTEL_DEBUG(DEBUG_NO_CCS))
          return false;
 
+      /* We can't init the clear color in small-bar mode */
+      if (modifier == I915_FORMAT_MOD_4_TILED_DG2_RC_CCS_CC &&
+          intel_vram_all_mappable(devinfo))
+         return false;
+
       enum isl_format rt_format =
          iris_format_for_usage(devinfo, pfmt,
                                ISL_SURF_USAGE_RENDER_TARGET_BIT).fmt;
