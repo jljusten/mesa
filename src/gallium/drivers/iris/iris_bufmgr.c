@@ -1624,6 +1624,8 @@ iris_bo_map(struct util_debug_callback *dbg,
       uint64_t offset = bo->address - real->address;
       map = iris_bo_map(dbg, real, flags | MAP_ASYNC) + offset;
    } else {
+      assert(bufmgr->all_vram_mappable ||
+             bo->real.heap != IRIS_HEAP_DEVICE_LOCAL);
       assert(bo->real.mmap_mode != IRIS_MMAP_NONE);
       if (bo->real.mmap_mode == IRIS_MMAP_NONE)
          return NULL;
