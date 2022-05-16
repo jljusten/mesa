@@ -946,13 +946,17 @@ iris_resource_init_aux_buf(struct iris_screen *screen,
 
    unsigned cc_state_size = iris_get_aux_clear_color_state_size(screen, res);
    if (cc_state_size > 0) {
-      if (!map)
-         map = iris_bo_map(NULL, res->bo, MAP_WRITE | MAP_RAW);
-      if (!map)
-         return false;
+      if (intel_vram_all_mappable(&screen->devinfo)) {
+         if (!map)
+            map = iris_bo_map(NULL, res->bo, MAP_WRITE | MAP_RAW);
+         if (!map)
+            return false;
 
-      /* Zero the indirect clear color to match ::fast_clear_color. */
-      memset((char *)map + res->aux.clear_color_offset, 0, cc_state_size);
+         /* Zero the indirect clear color to match ::fast_clear_color. */
+         memset((char *)map + res->aux.clear_color_offset, 0, cc_state_size);
+      } else {
+         res->aux.clear_color_unknown = true;
+      }
    }
 
    if (map)
