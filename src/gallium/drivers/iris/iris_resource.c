@@ -878,11 +878,20 @@ iris_resource_configure_aux(struct iris_screen *screen,
           * Even if we wanted to, we can't initialize the CCS via CPU map. So,
           * we choose an aux state which describes the current state and helps
           * avoid ambiguating (something not currently supported for STC_CCS).
+          *
+          * If not all of vram is mappable (small-BAR systems), and the buffer
+          * has clear-color state, then we set the initial state to
+          * ISL_AUX_STATE_AUX_INVALID. This is required because we couldn't
+          * map the buffer to initialize the clear-color state area.
           */
          assert(isl_aux_usage_has_compression(res->aux.usage));
-         initial_state = isl_aux_usage_has_fast_clears(res->aux.usage) ?
-                         ISL_AUX_STATE_COMPRESSED_CLEAR :
-                         ISL_AUX_STATE_COMPRESSED_NO_CLEAR;
+         if (!intel_vram_all_mappable(&screen->devinfo) &&
+             iris_get_aux_clear_color_state_size(screen, res) > 0)
+            initial_state = ISL_AUX_STATE_AUX_INVALID;
+         else if (isl_aux_usage_has_fast_clears(res->aux.usage))
+            initial_state = ISL_AUX_STATE_COMPRESSED_CLEAR;
+         else
+            initial_state = ISL_AUX_STATE_COMPRESSED_NO_CLEAR;
       } else {
          assert(res->aux.surf.size_B > 0);
          /* When CCS is used, we need to ensure that it starts off in a valid
