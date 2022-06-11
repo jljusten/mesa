@@ -1631,18 +1631,21 @@ query_regions(struct intel_device_info *devinfo, int fd, bool update)
             devinfo->mem.vram.mem_instance = mem->region.memory_instance;
             if (mem->probed_cpu_visible_size > 0) {
                devinfo->mem.vram.mappable.size = mem->probed_cpu_visible_size;
+               devinfo->mem.vram.unmappable.size =
+                  mem->probed_size - mem->probed_cpu_visible_size;
             } else {
                /* We are running on an older kernel without support for the
                 * small-bar uapi. These kernels only support systems where the
                 * entire vram is mappable.
                 */
                devinfo->mem.vram.mappable.size = mem->probed_size;
+               devinfo->mem.vram.unmappable.size = 0;
             }
          } else {
             assert(devinfo->mem.vram.mem_class == mem->region.memory_class);
             assert(devinfo->mem.vram.mem_instance == mem->region.memory_instance);
-            assert(devinfo->mem.vram.mappable.size == mem->probed_size ||
-                   devinfo->mem.vram.mappable.size == mem->probed_cpu_visible_size);
+            assert((devinfo->mem.vram.mappable.size +
+                    devinfo->mem.vram.unmappable.size) == mem->probed_size);
          }
          if (mem->unallocated_size != -1)
             devinfo->mem.vram.mappable.free = mem->unallocated_size;
@@ -2028,7 +2031,9 @@ intel_get_device_info_from_fd(int fd, struct intel_device_info *devinfo)
       compute_system_memory(devinfo, false);
 
    /* region info is required for lmem support */
-   if (devinfo->has_local_mem && !devinfo->mem.use_class_instance) {
+   if (devinfo->has_local_mem &&
+       devinfo->mem.vram.mappable.size == 0 &&
+       devinfo->mem.vram.unmappable.size == 0) {
       mesa_logw("Could not query local memory size.");
       return false;
    }
