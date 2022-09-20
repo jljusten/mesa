@@ -790,7 +790,7 @@ anv_get_image_format_features2(const struct intel_device_info *devinfo,
           * surface. We could support storage access on images with aux
           * modifiers by resolving the aux surface prior to the storage access.
           */
-         flags &= ~VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT;
+         //flags &= ~VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT;
          flags &= ~VK_FORMAT_FEATURE_2_STORAGE_IMAGE_ATOMIC_BIT;
       }
    }
