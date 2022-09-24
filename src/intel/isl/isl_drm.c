@@ -167,56 +167,34 @@ uint32_t
 isl_drm_modifier_get_score(const struct intel_device_info *devinfo,
                            uint64_t modifier)
 {
-   static int debug = 0;
-   if (debug++ == 0) {
-      fprintf(stderr, "Attach debugger now\n");
-      sleep(15);
-   }
-   fprintf(stderr, "FX, get_score, %016lx = ", modifier);
    /* FINISHME: Add gfx12 modifiers */
    switch (modifier) {
    default:
-      fprintf(stderr, "0 \n");
       return 0;
    case DRM_FORMAT_MOD_LINEAR:
-      {  fprintf(stderr, "1 \n");
       return 1;
-      }
    case I915_FORMAT_MOD_X_TILED:
-      {  fprintf(stderr, "2 \n");
       return 2;
-      }
    case I915_FORMAT_MOD_Y_TILED:
       /* Gfx12.5 doesn't have Y-tiling. */
       if (devinfo->verx10 >= 125)
-      {  fprintf(stderr, "0 \n");
          return 0;
-      }
-      fprintf(stderr, "3 \n");
 
       return 3;
    case I915_FORMAT_MOD_4_TILED:
       /* Gfx12.5 introduces Tile4. */
       if (devinfo->verx10 < 125)
-      {  fprintf(stderr, "0 \n");
          return 0;
-      }
 
-      fprintf(stderr, "3 \n");
       return 3;
    case I915_FORMAT_MOD_Y_TILED_CCS:
       /* Gfx12's CCS layout differs from Gfx9-11. */
       if (devinfo->ver >= 12)
-      {  fprintf(stderr, "0 \n");
          return 0;
-      }
 
       if (INTEL_DEBUG(DEBUG_NO_CCS))
-      {  fprintf(stderr, "0 \n");
          return 0;
-      }
 
-      fprintf(stderr, "4 \n");
       return 4;
    case I915_FORMAT_MOD_4_TILED_DG2_RC_CCS_CC:
       /* XXX: Is more needed for the clear color modifier? */
@@ -224,16 +202,11 @@ isl_drm_modifier_get_score(const struct intel_device_info *devinfo,
    case I915_FORMAT_MOD_4_TILED_DG2_RC_CCS:
       /* Gfx12.5 introduces Tile4. */
       if (devinfo->verx10 < 125)
-      {  fprintf(stderr, "0 \n");
          return 0;
-      }
 
       if (INTEL_DEBUG(DEBUG_NO_CCS))
-      {  fprintf(stderr, "0 \n");
          return 0;
-      }
 
-      fprintf(stderr, "4 \n");
       return 4;
    }
 }
