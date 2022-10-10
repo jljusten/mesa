@@ -302,6 +302,7 @@ iris_get_dmabuf_modifier_planes(struct pipe_screen *pscreen, uint64_t modifier,
    switch (modifier) {
    case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC:
       return 3;
+   case I915_FORMAT_MOD_4_TILED_MTL_RC_CCS:
    case I915_FORMAT_MOD_4_TILED_DG2_RC_CCS_CC:
    case I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS:
    case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
