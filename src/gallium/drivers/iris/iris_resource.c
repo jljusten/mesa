@@ -1045,6 +1045,7 @@ iris_resource_finish_aux_import(struct pipe_screen *pscreen,
 
    /* Combine main and aux plane information. */
    switch (res->mod_info->modifier) {
+   case I915_FORMAT_MOD_4_TILED_MTL_RC_CCS:
    case I915_FORMAT_MOD_Y_TILED_CCS:
    case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
       assert(num_main_planes == 1 && num_planes == 2);
@@ -1072,6 +1073,7 @@ iris_resource_finish_aux_import(struct pipe_screen *pscreen,
                        iris_get_aux_clear_color_state_size(screen, res),
                        4096, IRIS_MEMZONE_OTHER, BO_ALLOC_ZEROED);
       break;
+   case I915_FORMAT_MOD_4_TILED_MTL_RC_CCS_CC:
    case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC:
       assert(num_main_planes == 1 && num_planes == 3);
       import_aux_info(r[0], r[1]);
