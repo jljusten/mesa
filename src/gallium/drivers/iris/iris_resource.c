@@ -604,7 +604,7 @@ map_aux_addresses(struct iris_screen *screen, struct iris_resource *res,
       const enum isl_format format =
          iris_format_for_usage(&screen->devinfo, pfmt, res->surf.usage).fmt;
       const uint64_t format_bits =
-         intel_aux_map_format_bits(res->surf.tiling, format, plane);
+         intel_aux_map_format_bits(aux_map_ctx, res->surf.tiling, format, plane);
       intel_aux_map_add_mapping(aux_map_ctx, res->bo->address + res->offset,
                                 res->aux.bo->address + aux_offset,
                                 res->surf.size_B, format_bits);

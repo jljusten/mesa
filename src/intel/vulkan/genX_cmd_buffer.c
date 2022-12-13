@@ -483,7 +483,9 @@ anv_image_init_aux_tt(struct anv_cmd_buffer *cmd_buffer,
       anv_address_physical(anv_image_address(image, &surface->memory_range));
 
    const struct isl_surf *isl_surf = &image->planes[plane].primary_surface.isl;
-   uint64_t format_bits = intel_aux_map_format_bits_for_isl_surf(isl_surf);
+   struct intel_aux_map_context *ctx = cmd_buffer->device->aux_map_ctx;
+   uint64_t format_bits =
+      intel_aux_map_format_bits_for_isl_surf(ctx, isl_surf);
 
    /* We're about to live-update the AUX-TT.  We really don't want anyone else
     * trying to read it while we're doing this.  We could probably get away
@@ -543,7 +545,6 @@ anv_image_init_aux_tt(struct anv_cmd_buffer *cmd_buffer,
          uint64_t address = base_address + offset;
 
          uint64_t aux_entry_addr64, *aux_entry_map;
-         struct intel_aux_map_context *ctx = cmd_buffer->device->aux_map_ctx;
          aux_entry_map = intel_aux_map_get_entry(ctx, address, &aux_entry_addr64);
 
          struct anv_address aux_entry_address = {

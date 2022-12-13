@@ -95,11 +95,13 @@ uint64_t
 intel_aux_map_get_base(struct intel_aux_map_context *ctx);
 
 uint64_t
-intel_aux_map_format_bits(enum isl_tiling tiling, enum isl_format format,
+intel_aux_map_format_bits(struct intel_aux_map_context *ctx,
+                          enum isl_tiling tiling, enum isl_format format,
                           uint8_t plane);
 
 uint64_t
-intel_aux_map_format_bits_for_isl_surf(const struct isl_surf *isl_surf);
+intel_aux_map_format_bits_for_isl_surf(struct intel_aux_map_context *ctx,
+                                       const struct isl_surf *isl_surf);
 
 uint64_t *
 intel_aux_map_get_entry(struct intel_aux_map_context *ctx,

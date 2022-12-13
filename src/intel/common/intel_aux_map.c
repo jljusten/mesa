@@ -445,7 +445,8 @@ get_bpp_encoding(enum isl_format format)
 #define INTEL_AUX_MAP_ENTRY_Y_TILED_BIT  (0x1ull << 52)
 
 uint64_t
-intel_aux_map_format_bits(enum isl_tiling tiling, enum isl_format format,
+intel_aux_map_format_bits(struct intel_aux_map_context *ctx,
+                          enum isl_tiling tiling, enum isl_format format,
                           uint8_t plane)
 {
    if (aux_map_debug)
@@ -467,7 +468,8 @@ intel_aux_map_format_bits(enum isl_tiling tiling, enum isl_format format,
 }
 
 uint64_t
-intel_aux_map_format_bits_for_isl_surf(const struct isl_surf *isl_surf)
+intel_aux_map_format_bits_for_isl_surf(struct intel_aux_map_context *ctx,
+                                       const struct isl_surf *isl_surf)
 {
    assert(!isl_format_is_planar(isl_surf->format));
    return intel_aux_map_format_bits(isl_surf->tiling, isl_surf->format, 0);
