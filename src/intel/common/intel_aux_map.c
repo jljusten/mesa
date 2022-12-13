@@ -186,6 +186,7 @@ struct intel_aux_map_context {
    uint32_t tail_offset, tail_remaining;
    uint32_t state_num;
    const struct aux_format_info *format;
+   bool format_bits_ignored;
 };
 
 static inline uint64_t
@@ -353,6 +354,13 @@ intel_aux_map_init(void *driver_ctx,
    ctx->tail_remaining = 0;
    ctx->state_num = 0;
 
+   if (intel_device_info_is_mtl(devinfo)) {
+      /* Bspec 44930: "Compression format from AUX page walk is ignored.
+       * Instead compression format from Surface State is used."
+       */
+      ctx->format_bits_ignored = true;
+   }
+
    if (add_sub_table(ctx, 32 * 1024, 32 * 1024, &ctx->level3_base_addr,
                      &ctx->level3_map)) {
       if (aux_map_debug)
@@ -449,6 +457,9 @@ intel_aux_map_format_bits(struct intel_aux_map_context *ctx,
                           enum isl_tiling tiling, enum isl_format format,
                           uint8_t plane)
 {
+   if (ctx->format_bits_ignored)
+      return 0;
+
    if (aux_map_debug)
       fprintf(stderr, "AUX-MAP entry %s, bpp_enc=%d\n",
               isl_format_get_name(format),
@@ -471,8 +482,10 @@ uint64_t
 intel_aux_map_format_bits_for_isl_surf(struct intel_aux_map_context *ctx,
                                        const struct isl_surf *isl_surf)
 {
-   assert(!isl_format_is_planar(isl_surf->format));
-   return intel_aux_map_format_bits(isl_surf->tiling, isl_surf->format, 0);
+   assert(ctx->format_bits_ignored ||
+          !isl_format_is_planar(isl_surf->format));
+   return intel_aux_map_format_bits(ctx, isl_surf->tiling, isl_surf->format,
+                                    0);
 }
 
 static void
