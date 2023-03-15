@@ -25,19 +25,19 @@
 import argparse
 import io
 import os
+import sys
 
 
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('output', help="Name of output file")
-    parser.add_argument('input', nargs='+', help="Name of input file(s)")
-    parser.add_argument("-n", "--name", action='append', default=[],
-                        help="Name of C variable")
+    parser.add_argument('input', nargs='*', help="Name of input file(s)")
+    parser.add_argument("-n", "--name-and-input", nargs=2, action='append',
+                        default=[], metavar='PARAM',
+                        help="Name of C variable, then input file")
     parser.add_argument("-b", "--binary", dest='binary', action='store_const',
                         const=True, default=False)
     args = parser.parse_args()
-    if args.name and len(args.name) != len(args.input):
-        parser.error('If the --names option is used, it must be used once for each input')
     return args
 
 
@@ -53,18 +53,15 @@ def emit_byte(f, b):
 
 
 def process_file(args):
+    # For input files specified without a symbol name, pick one based
+    # on thename of the input file.
+    sym_input = [(filename_to_C_identifier(fn), fn) for fn in args.input]
+    # Add the input files that specified a symbol name.
+    sym_input.extend([(nf[0], nf[1]) for nf in args.name_and_input])
     try:
         with io.open(args.output, "wb") as outfile:
-            for i, f in enumerate(args.input):
+            for (name, f) in sym_input:
                 with io.open(f, "rb") as infile:
-                        # If a name was not specified on the command line, pick one based on the
-                        # name of the input file.  If no input filename was specified, use
-                        # from_stdin.
-                        if args.name:
-                            name = args.name[i]
-                        else:
-                            name = filename_to_C_identifier(f)
-
                         outfile.write("static const char {}[] = \n".format(name).encode('utf-8'))
                         outfile.write(b"{")
 
