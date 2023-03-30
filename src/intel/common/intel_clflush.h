@@ -24,18 +24,48 @@
 #ifndef INTEL_CLFLUSH_H
 #define INTEL_CLFLUSH_H
 
+#ifdef HAVE___BUILTIN_IA32_CLFLUSHOPT
+#include "util/u_cpu_detect.h"
+#endif
+
 #define CACHELINE_SIZE 64
 #define CACHELINE_MASK 63
 
 #ifdef SUPPORT_INTEL_INTEGRATED_GPUS
+static bool
+intel_has_clflushopt(void)
+{
+#ifdef HAVE___BUILTIN_IA32_CLFLUSHOPT
+   const struct util_cpu_caps_t *cpu_caps = util_get_cpu_caps();
+   return cpu_caps->has_clflushopt;
+#else
+   return false;
+#endif
+}
+
+static void
+intel_clflushopt(void *p)
+{
+#ifdef HAVE___BUILTIN_IA32_CLFLUSHOPT
+   __builtin_ia32_clflushopt(p);
+#else
+   assert(!"clflushopt is not supported by this compiler!");
+   __builtin_ia32_clflush(p);
+#endif
+}
+
 static inline void
 intel_clflush_range(void *start, size_t size)
 {
    void *p = (void *) (((uintptr_t) start) & ~CACHELINE_MASK);
    void *end = start + size;
+   bool has_clflushopt = intel_has_clflushopt();
 
    while (p < end) {
-      __builtin_ia32_clflush(p);
+      if (has_clflushopt)
+         intel_clflushopt(p);
+      else
+         __builtin_ia32_clflush(p);
       p += CACHELINE_SIZE;
    }
 }
