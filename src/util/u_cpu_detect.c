@@ -844,10 +844,12 @@ _util_cpu_detect_once(void)
          if (cacheline > 0)
             util_cpu_caps.cacheline = cacheline;
       }
-      if (util_cpu_caps.has_avx && regs[0] >= 0x00000007) {
+      if (regs[0] >= 0x00000007) {
          uint32_t regs7[4];
          cpuid_count(0x00000007, 0x00000000, regs7);
-         util_cpu_caps.has_avx2 = (regs7[1] >> 5) & 1;
+         if (util_cpu_caps.has_avx)
+            util_cpu_caps.has_avx2 = (regs7[1] >> 5) & 1;
+         util_cpu_caps.has_clflushopt = (regs7[1] >> 23) & 1;
       }
 
       // check for avx512
