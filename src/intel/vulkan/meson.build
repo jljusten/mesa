@@ -25,6 +25,7 @@ inc_anv = include_directories('.')
 anv_flags = [
   no_override_init_args,
   sse2_args,
+  clflushopt_args,
 ]
 
 anv_cpp_flags = []
@@ -290,7 +291,7 @@ if with_tests
       executable(
         t,
         ['tests/@0@.c'.format(t), anv_entrypoints[0]],
-        c_args : [ sse2_args ],
+        c_args : [ sse2_args, clflushopt_args ],
         link_with : libvulkan_intel_test,
         dependencies : [
           dep_libdrm, dep_thread, dep_m, dep_valgrind,
