@@ -90,6 +90,23 @@ i915_gem_create(struct iris_bufmgr *bufmgr,
                         &protected_param.base);
    }
 
+   /* Set PAT param */
+   uint32_t pat_index;
+   if (alloc_flags & (BO_ALLOC_COHERENT))
+      pat_index = 3; /* 1-way coherent */
+   else if (alloc_flags & (BO_ALLOC_SHARED | BO_ALLOC_SCANOUT))
+      pat_index = 3; /* 1-way coherent */
+   else
+      pat_index = 0; /* WB */
+   struct drm_i915_gem_create_ext_set_pat set_pat_param = {
+      .pat_index = pat_index,
+   };
+   if (!iris_bufmgr_get_device_info(bufmgr)->has_caching_uapi) {
+      intel_gem_add_ext(&create.extensions,
+                        I915_GEM_CREATE_EXT_SET_PAT,
+                        &set_pat_param.base);
+   }
+
    if (intel_ioctl(iris_bufmgr_get_fd(bufmgr), DRM_IOCTL_I915_GEM_CREATE_EXT,
                    &create))
       return 0;

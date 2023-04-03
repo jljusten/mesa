@@ -320,7 +320,8 @@ bucket_for_size(struct iris_bufmgr *bufmgr, uint64_t size,
     */
    if ((flags & BO_ALLOC_PROTECTED) ||
        ((flags & (BO_ALLOC_SHARED | BO_ALLOC_SCANOUT)) &&
-        bufmgr->devinfo.kmd_type == INTEL_KMD_TYPE_XE))
+        (bufmgr->devinfo.kmd_type == INTEL_KMD_TYPE_XE ||
+         !bufmgr->devinfo.has_caching_uapi)))
       return NULL;
 
    /* Calculating the pages and rounding up to the page size. */
