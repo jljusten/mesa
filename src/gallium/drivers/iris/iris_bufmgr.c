@@ -1583,6 +1583,26 @@ iris_bo_map(struct util_debug_callback *dbg,
       bo_wait_with_stall_warning(dbg, bo, "memory mapping");
    }
 
+   if (!bufmgr->devinfo.has_llc && bo->real.mmap_mode != IRIS_MMAP_WB) {
+      /* If we're reusing an existing CPU mapping, the CPU caches may
+       * contain stale data from the last time we read from that mapping.
+       * (With the BO cache, it might even be data from a previous buffer!)
+       * Even if it's a brand new mapping, the kernel may have zeroed the
+       * buffer via CPU writes.
+       *
+       * We need to invalidate those cachelines so that we see the latest
+       * contents, and so long as we only read from the CPU mmap we do not
+       * need to write those cachelines back afterwards.
+       *
+       * On LLC, the empirical evidence suggests that writes from the GPU
+       * that bypass the LLC (i.e. for scanout) do *invalidate* the CPU
+       * cachelines. (Other reads, such as the display engine, bypass the
+       * LLC entirely requiring us to keep dirty pixels for the scanout
+       * out of any cache.)
+       */
+      intel_invalidate_range(map, bo->size);
+   }
+
    return map;
 }
 
