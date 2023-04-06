@@ -79,7 +79,7 @@ i915_gem_create(struct anv_device *device,
    else if (alloc_flags & (ANV_BO_ALLOC_EXTERNAL | ANV_BO_ALLOC_SCANOUT))
       pat_index = 3; /* 1-way coherent */
    else
-      pat_index = 0; /* WB */
+      pat_index = 3; /* WB */
    struct drm_i915_gem_create_ext_set_pat set_pat_param = {
       .pat_index = pat_index,
    };
