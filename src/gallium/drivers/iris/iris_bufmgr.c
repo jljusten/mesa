@@ -1147,6 +1147,13 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
       bo->real.reusable = false;
    }
 
+   if (!(flags & (BO_ALLOC_COHERENT))) {
+      void *map = iris_bo_map(NULL, bo, MAP_WRITE | MAP_RAW);
+      if (map)
+	intel_invalidate_range(map, bo->size);
+   }
+
+
    DBG("bo_create: buf %d (%s) (%s memzone) (%s) %llub\n", bo->gem_handle,
        bo->name, memzone_name(memzone), iris_heap_to_string[bo->real.heap],
        (unsigned long long) size);
