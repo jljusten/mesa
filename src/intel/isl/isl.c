@@ -112,6 +112,9 @@ isl_device_setup_mocs(struct isl_device *dev)
          dev->mocs.internal = 1 << 1;
          /* Displayables cached to L3+L4:WT */
          dev->mocs.external = 14 << 1;
+         /* Uncached - GO:Mem */
+         dev->mocs.blitter_dst = 5 << 1;
+         dev->mocs.blitter_src = 5 << 1;
       } else if (intel_device_info_is_dg2(dev->info)) {
          /* L3CC=WB; BSpec: 45101 */
          dev->mocs.internal = 3 << 1;
