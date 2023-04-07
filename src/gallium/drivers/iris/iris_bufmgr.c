@@ -2135,7 +2135,8 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
    bo->real.kflags = EXEC_OBJECT_SUPPORTS_48B_ADDRESS | EXEC_OBJECT_PINNED |
                      EXEC_OBJECT_CAPTURE;
    bo->real.mmap_mode =
-      bo->real.heap != IRIS_HEAP_SYSTEM_MEMORY ? IRIS_MMAP_WC : IRIS_MMAP_WB;
+      bo->real.heap != IRIS_HEAP_SYSTEM_MEMORY ||
+      !bufmgr->devinfo.has_caching_uapi ? IRIS_MMAP_WC : IRIS_MMAP_WB;
 
    buf->driver_bo = bo;
    buf->gpu = bo->address;
