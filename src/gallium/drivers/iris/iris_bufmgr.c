@@ -2142,6 +2142,8 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
    buf->gpu = bo->address;
    buf->gpu_end = buf->gpu + bo->size;
    buf->map = iris_bo_map(NULL, bo, MAP_WRITE | MAP_RAW);
+   if (!bufmgr->devinfo.has_caching_uapi)
+      intel_invalidate_range(buf->map, bo->size);
    return buf;
 
 err_vm_alloc:
