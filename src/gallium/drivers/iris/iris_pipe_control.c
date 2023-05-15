@@ -396,7 +396,8 @@ static void
 iris_memory_barrier(struct pipe_context *ctx, unsigned flags)
 {
    struct iris_context *ice = (void *) ctx;
-   unsigned bits = PIPE_CONTROL_DATA_CACHE_FLUSH | PIPE_CONTROL_CS_STALL;
+   unsigned bits = PIPE_CONTROL_DATA_CACHE_FLUSH | PIPE_CONTROL_CS_STALL |
+                   PIPE_CONTROL_UNTYPED_DATAPORT_CACHE_FLUSH;
 
    if (flags & (PIPE_BARRIER_VERTEX_BUFFER |
                 PIPE_BARRIER_INDEX_BUFFER |
