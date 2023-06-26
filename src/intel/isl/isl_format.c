@@ -27,6 +27,7 @@
 #include "isl_priv.h"
 #include "dev/intel_device_info.h"
 
+#include "util/log.h"
 #include "util/macros.h" /* Needed for MAX3 and MAX2 for format_rgb9e5 */
 #include "util/format_srgb.h"
 #include "util/format_rgb9e5.h"
@@ -878,7 +879,7 @@ isl_format_supports_ccs_e(const struct intel_device_info *devinfo,
 {
    /* Wa_14017353530: Disable compression on MTL until B0 */
    if (intel_device_info_is_mtl(devinfo) && devinfo->revision < 4)
-      return false;
+      mesa_logw("Ignoring Wa_14017353530 and enabling CCS on MTL");
 
    /* Wa_22011186057: Disable compression on ADL-P A0 */
    if (devinfo->platform == INTEL_PLATFORM_ADL && devinfo->gt == 2 && devinfo->revision == 0)
