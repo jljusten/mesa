@@ -4155,9 +4155,9 @@ VkResult anv_FlushMappedMemoryRanges(
       if (map_offset >= mem->map_size)
          continue;
 
-      intel_flush_range(mem->map + map_offset,
-                        MIN2(pMemoryRanges[i].size,
-                             mem->map_size - map_offset));
+      intel_flush_range_no_fence(mem->map + map_offset,
+                                 MIN2(pMemoryRanges[i].size,
+                                      mem->map_size - map_offset));
    }
 #endif
    return VK_SUCCESS;
