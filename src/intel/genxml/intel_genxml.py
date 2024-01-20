@@ -45,10 +45,22 @@ BASE_TYPES = {
 
 FIXED_PATTERN = re.compile(r"(s|u)(\d+)\.(\d+)")
 
+try:
+    # Python 3.7 and newer should be able to support strong typing for
+    # our OrderedDict usage.
+    def typed_ordered_dict(key_ty, val_ty):
+        return typing.OrderedDict[str, bool]
+    # This will raise an exception on Python 3.6
+    typed_ordered_dict(int, int)
+except Exception:
+    # For Python 3.6 we return an untyped OrderedDict
+    def typed_ordered_dict(key_ty, val_ty):
+        return OrderedDict
+
 def is_base_type(name: str) -> bool:
     return name in BASE_TYPES or FIXED_PATTERN.match(name) is not None
 
-def add_struct_refs(items: typing.OrderedDict[str, bool], node: et.Element) -> None:
+def add_struct_refs(items: typed_ordered_dict(str, bool), node: et.Element) -> None:
     if node.tag == 'field':
         if 'type' in node.attrib and not is_base_type(node.attrib['type']):
             t = node.attrib['type']
@@ -64,16 +76,16 @@ class Struct(object):
     def __init__(self, xml: et.Element):
         self.xml = xml
         self.name = xml.attrib['name']
-        self.deps: typing.OrderedDict[str, Struct] = OrderedDict()
+        self.deps: typed_ordered_dict(str, Struct) = OrderedDict()
 
     def find_deps(self, struct_dict, enum_dict) -> None:
-        deps: typing.OrderedDict[str, bool] = OrderedDict()
+        deps: typed_ordered_dict(str, bool) = OrderedDict()
         add_struct_refs(deps, self.xml)
         for d in deps.keys():
             if d in struct_dict:
                 self.deps[d] = struct_dict[d]
 
-    def add_xml(self, items: typing.OrderedDict[str, et.Element]) -> None:
+    def add_xml(self, items: typed_ordered_dict(str, et.Element)) -> None:
         for d in self.deps.values():
             d.add_xml(items)
         items[self.name] = self.xml
@@ -151,7 +163,7 @@ def sort_xml(xml: et.ElementTree) -> None:
     for ws in wrapped_struct_dict.values():
         ws.find_deps(wrapped_struct_dict, enum_dict)
 
-    sorted_structs: typing.OrderedDict[str, et.Element] = OrderedDict()
+    sorted_structs: typed_ordered_dict(str, et.Element) = OrderedDict()
     for s in structs:
         _s = wrapped_struct_dict[s.attrib['name']]
         _s.add_xml(sorted_structs)
