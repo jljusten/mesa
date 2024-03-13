@@ -290,12 +290,19 @@ with_any_broadcom = [
   with_broadcom_vk,
 ].contains(true)
 
-if get_option('intel-clc') != 'system'
+if get_option('intel-clc') == 'system'
+  with_intel_clc = true
+  build_intel_clc = false
+elif get_option('intel-clc') == 'enabled'
+  with_intel_clc = true
+  build_intel_clc = true
+elif get_option('intel-clc') == 'auto'
   # Require intel-clc with Anv & Iris (for internal shaders)
-  with_intel_clc = get_option('intel-clc') == 'enabled' or \
-                   with_intel_vk or with_gallium_iris
+  with_intel_clc = with_intel_vk or with_gallium_iris
+  build_intel_clc = with_intel_clc
 else
   with_intel_clc = false
+  build_intel_clc = false
 endif
 
 with_intel_vk_rt = get_option('intel-rt') \

@@ -30,11 +30,11 @@ foreach input_arg : intel_shader_files
 endforeach
 
 intel_shaders_clc_wa_args = []
-if with_intel_clc
+if build_intel_clc
   if chosen_llvm_version_major >= 17
     intel_shaders_clc_wa_args += ['--llvm17-wa']
   endif
-else
+elif with_intel_clc
   _intel_clc_llvm_version = run_command(prog_intel_clc, '-M')
   if _intel_clc_llvm_version.stdout().strip().version_compare('>= 17.0')
     intel_shaders_clc_wa_args += ['--llvm17-wa']
