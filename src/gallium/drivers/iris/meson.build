@@ -70,11 +70,16 @@ files_libiris = files(
   'iris_utrace.c',
 )
 
+intel_indirect_gen_srcs = []
+if with_intel_clc or false
+  intel_indirect_gen_srcs = ['iris_indirect_gen.c',]
+endif
+
 iris_per_hw_ver_libs = []
 foreach v : ['80', '90', '110', '120', '125', '200']
   iris_per_hw_ver_libs += static_library(
     'iris_per_hw_ver@0@'.format(v),
-    ['iris_blorp.c', 'iris_query.c', 'iris_state.c', 'iris_indirect_gen.c', gen_xml_pack],
+    ['iris_blorp.c', 'iris_query.c', 'iris_state.c', intel_indirect_gen_srcs, gen_xml_pack],
     include_directories : [inc_include, inc_src, inc_mapi, inc_mesa, inc_gallium, inc_gallium_aux, inc_intel],
     c_args : [
       no_override_init_args, sse2_args,

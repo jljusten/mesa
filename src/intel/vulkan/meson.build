@@ -108,11 +108,13 @@ anv_per_hw_ver_files = files(
   'genX_gfx_state.c',
   'genX_gpu_memcpy.c',
   'genX_init_state.c',
-  'genX_internal_kernels.c',
   'genX_pipeline.c',
   'genX_query.c',
   'genX_simple_shader.c',
 )
+if with_intel_clc or false
+  anv_per_hw_ver_files += files('genX_internal_kernels.c',)
+endif
 if with_intel_vk_rt
   anv_per_hw_ver_files += files('genX_acceleration_structure.c',)
 endif
