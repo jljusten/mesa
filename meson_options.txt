@@ -637,7 +637,7 @@ option(
   deprecated: {'true': 'enabled'},
   value : 'auto',
   choices : [
-    'enabled', 'system', 'auto'
+    'enabled', 'disabled', 'system', 'auto'
   ],
   description : 'Build the intel-clc compiler or use a system version.'
 )

@@ -301,12 +301,15 @@ elif get_option('intel-clc') == 'auto'
   with_intel_clc = with_intel_vk or with_gallium_iris
   build_intel_clc = with_intel_clc
 else
+  # intel-clc=disabled
   with_intel_clc = false
   build_intel_clc = false
+  error('''Support for intel-clc=disabled isn't enabled yet''')
 endif
 
 with_intel_vk_rt = get_option('intel-rt') \
   .disable_auto_if(not with_intel_vk) \
+  .disable_if(not with_intel_clc, error_message : 'Intel Ray Tracing requires intel-clc') \
   .disable_if(host_machine.cpu_family() != 'x86_64', error_message : 'Intel Ray Tracing is only supported on x86_64') \
   .allowed()
 
