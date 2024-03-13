@@ -889,7 +889,9 @@ iris_screen_create(int fd, const struct pipe_screen_config *config)
    iris_init_screen_program_functions(pscreen);
 
    genX_call(screen->devinfo, init_screen_state, screen);
+#ifndef INTEL_CLC_DISABLED
    genX_call(screen->devinfo, init_screen_gen_state, screen);
+#endif
 
    glsl_type_singleton_init_or_ref();
 

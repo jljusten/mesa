@@ -198,8 +198,12 @@ static inline bool
 iris_use_draw_indirect_generation(const struct iris_screen *screen,
                                   const struct pipe_draw_indirect_info *dindirect)
 {
+#ifndef INTEL_CLC_DISABLED
    return dindirect != NULL &&
           dindirect->draw_count >= screen->driconf.generated_indirect_threshold;
+#else
+   return false;
+#endif
 }
 
 static void

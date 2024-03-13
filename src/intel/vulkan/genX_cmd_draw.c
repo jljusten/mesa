@@ -920,6 +920,7 @@ genX(cmd_buffer_flush_gfx_state)(struct anv_cmd_buffer *cmd_buffer)
 ALWAYS_INLINE static bool
 anv_use_generated_draws(const struct anv_cmd_buffer *cmd_buffer, uint32_t count)
 {
+#ifndef INTEL_CLC_DISABLED
    const struct anv_device *device = cmd_buffer->device;
    const struct anv_graphics_pipeline *pipeline =
       anv_pipeline_to_graphics(cmd_buffer->state.gfx.base.pipeline);
@@ -932,6 +933,9 @@ anv_use_generated_draws(const struct anv_cmd_buffer *cmd_buffer, uint32_t count)
       return false;
 
    return count >= device->physical->instance->generated_indirect_threshold;
+#else
+   return false;
+#endif
 }
 
 #include "genX_cmd_draw_helpers.h"

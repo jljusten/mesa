@@ -8594,6 +8594,7 @@ iris_upload_indirect_shader_render_state(struct iris_context *ice,
                                          const struct pipe_draw_indirect_info *indirect,
                                          const struct pipe_draw_start_count_bias *sc)
 {
+#ifndef INTEL_CLC_DISABLED
    assert(indirect);
 
    struct iris_batch *batch = &ice->batches[IRIS_BATCH_RENDER];
@@ -8769,6 +8770,9 @@ iris_upload_indirect_shader_render_state(struct iris_context *ice,
    uint32_t count = (sc) ? sc->count : 0;
    count *= draw->instance_count ? draw->instance_count : 1;
    trace_intel_end_draw(&batch->trace, count);
+#else
+   unreachable("Unsupported path");
+#endif
 }
 
 static void

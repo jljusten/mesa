@@ -74,6 +74,7 @@ compile_shader(struct anv_device *device,
                uint32_t hash_key_size,
                uint32_t sends_count_expectation)
 {
+#ifndef INTEL_CLC_DISABLED
    const nir_shader_compiler_options *nir_options =
       device->physical->compiler->nir_options[stage];
 
@@ -243,6 +244,9 @@ compile_shader(struct anv_device *device,
    ralloc_free(nir);
 
    return kernel;
+#else
+   return NULL;
+#endif
 }
 
 VkResult
@@ -250,6 +254,7 @@ anv_device_get_internal_shader(struct anv_device *device,
                                enum anv_internal_kernel_name name,
                                struct anv_shader_bin **out_bin)
 {
+#ifndef INTEL_CLC_DISABLED
    const struct {
       struct {
          char name[40];
@@ -349,6 +354,9 @@ anv_device_get_internal_shader(struct anv_device *device,
 
    *out_bin = bin;
    return VK_SUCCESS;
+#else
+   return VK_ERROR_DEVICE_LOST;
+#endif
 }
 
 VkResult
