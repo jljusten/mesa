@@ -41,12 +41,16 @@ elif with_intel_clc
   endif
 endif
 
-intel_shaders_gens = [ [ 80,   8],
-                       [ 90,   9],
-                       [110,  11],
-                       [120,  12],
-                       [125, 125],
-                       [200,  20] ]
+if with_intel_clc
+  intel_shaders_gens = [ [ 80,   8],
+                         [ 90,   9],
+                         [110,  11],
+                         [120,  12],
+                         [125, 125],
+                         [200,  20] ]
+else
+  intel_shaders_gens = []
+endif
 intel_shaders = []
 foreach gen : intel_shaders_gens
   intel_shaders += custom_target(
