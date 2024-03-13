@@ -304,7 +304,6 @@ else
   # intel-clc=disabled
   with_intel_clc = false
   build_intel_clc = false
-  error('''Support for intel-clc=disabled isn't enabled yet''')
 endif
 
 if not with_intel_clc
