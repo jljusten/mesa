@@ -307,6 +307,10 @@ else
   error('''Support for intel-clc=disabled isn't enabled yet''')
 endif
 
+if not with_intel_clc
+  pre_args += '-DINTEL_CLC_DISABLED'
+endif
+
 with_intel_vk_rt = get_option('intel-rt') \
   .disable_auto_if(not with_intel_vk) \
   .disable_if(not with_intel_clc, error_message : 'Intel Ray Tracing requires intel-clc') \
