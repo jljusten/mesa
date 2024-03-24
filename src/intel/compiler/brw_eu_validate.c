@@ -1063,15 +1063,17 @@ general_restrictions_on_region_parameters(const struct brw_isa_info *isa,
        * implies that elements within a 'Width' cannot cross GRF boundaries.
        */
       unsigned rowbase = subreg;
+      assert(util_is_power_of_two_nonzero(reg_unit(devinfo)));
+      unsigned grf_size_shift = (5 - 1) + ffs(reg_unit(devinfo));
 
       for (int y = 0; y < exec_size / width; y++) {
          unsigned grfs_accessed = 0;
          unsigned offset = rowbase;
 
          for (int x = 0; x < width; x++) {
-            const unsigned start_grf = offset / REG_SIZE;
+            const unsigned start_grf = offset >> grf_size_shift;
             const unsigned end_byte = offset + (element_size - 1);
-            const unsigned end_grf = end_byte / REG_SIZE;
+            const unsigned end_grf = end_byte >> grf_size_shift;
             grfs_accessed |= (1U << start_grf) | (1U << end_grf);
             offset += hstride * element_size;
          }
