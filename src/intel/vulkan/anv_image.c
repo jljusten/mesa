@@ -2547,7 +2547,7 @@ anv_bind_image_memory(struct anv_device *device,
        * have failed the creation of the BO.
        */
       if (device->info->has_flat_ccs &&
-          (anv_bo_is_vram_only(bo) ||
+          (device->info->ver >= 20 || anv_bo_is_vram_only(bo) ||
            (bo->alloc_flags & ANV_BO_ALLOC_IMPORTED)))
          continue;
 
