@@ -1702,7 +1702,10 @@ anv_image_init(struct anv_device *device, struct anv_image *image,
          isl_extra_usage_flags |= ISL_SURF_USAGE_DISABLE_AUX_BIT;
       }
 
-      if (device->info->ver >= 12 &&
+      if (device->info->ver >= 20) {
+         /* Xe2 CCS is in a region of memory that isn't managed by the UMD. */
+         isl_extra_usage_flags |= ISL_SURF_USAGE_DISABLE_AUX_BIT;
+      } else if (device->info->ver >= 12 &&
           !anv_formats_ccs_e_compatible(device->info, image->vk.create_flags,
                                         image->vk.format, image->vk.tiling,
                                         image->vk.usage, fmt_list)) {
