@@ -39,6 +39,7 @@
  */
 
 #include <stdlib.h>
+#include "util/bitset.h"
 #include "brw_eu.h"
 #include "brw_disasm_info.h"
 
@@ -47,6 +48,8 @@ struct string {
    char *str;
    size_t len;
 };
+
+#define MAX_REG_SIZE (2 * REG_SIZE)
 
 static void
 cat(struct string *dest, const struct string src)
@@ -1075,21 +1078,28 @@ general_restrictions_on_region_parameters(const struct brw_isa_info *isa,
       /* VertStride must be used to cross GRF register boundaries. This rule
        * implies that elements within a 'Width' cannot cross GRF boundaries.
        */
-      const uint64_t mask = (1ULL << element_size) - 1;
       unsigned rowbase = subreg;
+      const unsigned grf_size = REG_SIZE * reg_unit(devinfo);
 
       for (int y = 0; y < exec_size / width; y++) {
-         uint64_t access_mask = 0;
+         BITSET_DECLARE(access_mask, 2 * MAX_REG_SIZE);
+         BITSET_ZERO(access_mask);
          unsigned offset = rowbase;
 
          for (int x = 0; x < width; x++) {
-            access_mask |= mask << (offset % 64);
+            unsigned aliased_offset = offset % BITSET_SIZE(access_mask);
+            unsigned aliased_end =
+               MIN2(aliased_offset + element_size - 1,
+                    BITSET_SIZE(access_mask) - 1);
+            BITSET_SET_RANGE(access_mask, aliased_offset, aliased_end);
             offset += hstride * element_size;
          }
 
          rowbase += vstride * element_size;
 
-         if ((uint32_t)access_mask != 0 && (access_mask >> 32) != 0) {
+         if (BITSET_TEST_RANGE(access_mask, 0, grf_size - 1) &&
+             BITSET_TEST_RANGE(access_mask, grf_size,
+                               BITSET_SIZE(access_mask) - 1)) {
             ERROR("VertStride must be used to cross GRF register boundaries");
             break;
          }
