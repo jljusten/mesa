@@ -234,16 +234,34 @@ apply_hwconfig_item(struct intel_device_info *devinfo,
    case INTEL_HWCONFIG_MAX_VECS:
    case INTEL_HWCONFIG_MAX_COPY_CS:
    case INTEL_HWCONFIG_DEPRECATED_URB_SIZE_IN_KB:
+      break; /* ignore */
    case INTEL_HWCONFIG_MIN_VS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.min_entries[MESA_SHADER_VERTEX], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MAX_VS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.max_entries[MESA_SHADER_VERTEX], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MIN_PCS_URB_ENTRIES:
    case INTEL_HWCONFIG_MAX_PCS_URB_ENTRIES:
+      break; /* ignore */
    case INTEL_HWCONFIG_MIN_HS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.min_entries[MESA_SHADER_TESS_CTRL], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MAX_HS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.max_entries[MESA_SHADER_TESS_CTRL], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MIN_GS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.min_entries[MESA_SHADER_GEOMETRY], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MAX_GS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.max_entries[MESA_SHADER_GEOMETRY], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MIN_DS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.min_entries[MESA_SHADER_TESS_EVAL], item->val[0]);
+      break;
    case INTEL_HWCONFIG_MAX_DS_URB_ENTRIES:
+      DEVINFO_HWCONFIG(urb.max_entries[MESA_SHADER_TESS_EVAL], item->val[0]);
+      break;
    case INTEL_HWCONFIG_PUSH_CONSTANT_URB_RESERVED_SIZE:
    case INTEL_HWCONFIG_POCS_PUSH_CONSTANT_URB_RESERVED_SIZE:
    case INTEL_HWCONFIG_URB_REGION_ALIGNMENT_SIZE_IN_BYTES:
