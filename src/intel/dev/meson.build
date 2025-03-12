@@ -37,6 +37,13 @@ inc_intel_dev_virtio += [
 link_intel_dev_virtio += [ libvdrm ]
 endif
 
+intel_hwconfig_src = custom_target('intel_hwconfig_gen.[h]',
+                                 input : ['intel_hwconfig.py'],
+                                 output : ['intel_hwconfig_gen.h'],
+                                 command : [prog_python,
+                                            '@INPUT0@', 'gen-sources',
+                                            '--h=@OUTPUT0@'])
+
 intel_dev_wa_src = custom_target('intel_wa.[ch]',
                                  input : ['gen_wa_helpers.py', 'mesa_defs.json'],
                                  output : ['intel_wa.h', 'intel_wa.c'],
@@ -61,7 +68,7 @@ idep_intel_dev_info_gen = declare_dependency(sources : [intel_dev_info_gen_src[0
 
 libintel_dev = static_library(
   'intel_dev',
-  [files_libintel_dev, sha1_h, [intel_dev_wa_src]],
+  [files_libintel_dev, sha1_h, [intel_dev_wa_src], intel_hwconfig_src],
   include_directories : [inc_include, inc_src, inc_intel, inc_intel_dev_virtio],
   dependencies : [dep_libdrm, idep_mesautil, idep_intel_dev_wa,
                   idep_intel_dev_info_gen],
