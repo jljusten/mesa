@@ -38,7 +38,8 @@ link_intel_dev_virtio += [ libvdrm ]
 endif
 
 intel_hwconfig_src = custom_target('intel_hwconfig_gen.[ch]',
-                                 input : ['intel_hwconfig.py'],
+                                 input : ['intel_hwconfig.py',
+                                          'intel_hwconfig.json'],
                                  output : ['intel_hwconfig_gen.h',
                                            'intel_hwconfig_gen.c'],
                                  command : [prog_python,

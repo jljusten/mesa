@@ -406,6 +406,9 @@ class Hwconfig:
     def for_json(self):
         return Hwconfig.decode_blob(self._bytes)
 
+    def to_ints(self):
+        return Hwconfig.blob_to_ints(self._bytes)
+
     @staticmethod
     def encode_blob(decoded_blob):
         assert isinstance(decoded_blob, list), f"{type(decoded_blob)}"
@@ -450,6 +453,16 @@ class Hwconfigs:
         }
         self.dev_to_hwconfig[pci_name] = dev_info
         return hwconfig
+
+    def has_pci_name(self, pci_name):
+        return pci_name in self.dev_to_hwconfig
+
+    def hwconfig_for_dev(self, pci_name):
+        return self.dev_to_hwconfig[pci_name]["hwconfig"]
+
+    def kernel_for_dev(self, pci_name):
+        kstr = self.dev_to_hwconfig[pci_name]["kernel"]
+        return tuple(int(v) for v in kstr.split("."))
 
     def for_json(self):
         result = []
@@ -586,6 +599,9 @@ class DrmDevice:
 
         return self._hwconfig_bytes
 
+    def hwconfig_ints(self):
+        return Hwconfig.blob_to_ints(self._hwconfig_bytes)
+
 
 class DrmDevices:
 
@@ -618,6 +634,56 @@ class DrmDevices:
 
     def display(self):
         print(HwconfigJson().dumps(self.hwconfigs.for_json()))
+
+
+class HwconfigDb:
+
+    def __init__(self):
+        here = pathlib.Path(sys.argv[0]).resolve().parent
+        self.db_path = here / "intel_hwconfig.json"
+        self.hwconfigs = Hwconfigs()
+        if self.db_path.exists():
+            with self.db_path.open() as f:
+                db = json.load(f)
+                self.__init_from_json(db)
+            self.changed = False
+        else:
+            self.changed = True
+
+    def __init_from_json(self, db):
+        assert isinstance(db, list)
+        for hwc in db:
+            devices = [[s.strip() for s in d.split(",")]
+                       for d in hwc["devices"]]
+            hwconfig_ints = Hwconfig.blob_to_ints(hwc["hwconfig_blob"])
+            hwconfig_bytes = b"".join(i.to_bytes(length=4, byteorder="little")
+                                      for i in hwconfig_ints)
+            for d in devices:
+                kver = d[1].replace("linux-", "")
+                self.hwconfigs.add_device(hwconfig_bytes, d[0], kver)
+
+    def __contains__(self, pci_name):
+        return self.hwconfigs.has_pci_name(pci_name)
+
+    def hwconfig_for_dev(self, pci_name):
+        return self.hwconfigs.hwconfig_for_dev(pci_name)
+
+    def kernel_for_dev(self, pci_name):
+        return self.hwconfigs.kernel_for_dev(pci_name)
+
+    def add_device(self, hwconfig_bytes, pci_name, kernel):
+        self.hwconfigs.add_device(hwconfig_bytes, pci_name, kernel)
+        self.changed = True
+
+    def save(self, force=False):
+        if not self.changed and not force:
+            return
+        with self.db_path.open("w") as f:
+            HwconfigJson().dump(self.hwconfigs.for_json(), f)
+        self.changed = False
+
+    def display(self):
+        print(HwconfigJson().dumps(self.db))
 
 
 C_TEMPLATE = """\
@@ -850,12 +916,94 @@ class HwconfigApp:
     def __init__(self):
         self.parse_args()
         mode = self.args.mode if self.args.mode else "display"
-        if mode == "gen-sources":
+        if mode == "check-db":
+            ok = True
+            self.drm_devs = DrmDevices(self.args)
+            self.db = HwconfigDb()
+            for d in self.drm_devs:
+                if d.pci_name not in self.db:
+                    ok = False
+                    print("error: use update-db to add "
+                          f"{d.pci_name} to hwconfig database.",
+                          file=sys.stderr)
+                    continue
+                db_ver = self.db.kernel_for_dev(d.pci_name)
+                if kernel_version_tuple < db_ver and not self.verbose:
+                    continue
+                dev_ints = d.hwconfig_ints()
+                db_ints = self.db.hwconfig_for_dev(d.pci_name).to_ints()
+                if dev_ints == db_ints:
+                    if self.verbose:
+                        print(f"info: {d.pci_name} hwconfig blob from kernel "
+                              "matched database.")
+                    continue
+                if kernel_version_tuple >= db_ver:
+                    ok = False
+                    print("error: use update-db to update "
+                          f"{d.pci_name} in hwconfig database.",
+                          file=sys.stderr)
+                else:
+                    assert self.verbose
+                    print(f"info: {d.pci_name} hwconfig blob mismatch, but "
+                          "database info is newer.")
+            sys.exit(0 if ok else 1)
+        elif mode == "gen-sources":
             self.gen_sources = GenHwconfigSources(self.args)
             sys.exit(0 if self.gen_sources.gen() else 1)
         elif mode == "display":
             self.drm_devs = DrmDevices(self.args)
             self.drm_devs.display()
+        elif mode == "update-db":
+            added = 0
+            modified = 0
+            self.drm_devs = DrmDevices(self.args)
+            self.db = HwconfigDb()
+            for d in self.drm_devs:
+                if d.pci_name not in self.db:
+                    print(f"{d.pci_name} device does not exist in current "
+                          "hwconfig database.")
+                    print("Only shipping production devices should be added "
+                          "to the hwconfig database!")
+                    print("Confirm that this device is available for purchase "
+                          "publicly.")
+                    confirmation = input("Is this a production device? "
+                                         "(enter YES to confirm) ")
+                    if confirmation != "YES":
+                        print(f"Skipping adding new {d.pci_name} device!")
+                        continue
+
+                    print(f"Adding {d.pci_name} to hwconfig database.")
+                    added += 1
+                    self.db.add_device(d.hwconfig_bytes(), d.pci_name,
+                                       kernel_version)
+                    continue
+
+                dev_ints = d.hwconfig_ints()
+                db_ints = self.db.hwconfig_for_dev(d.pci_name).to_ints()
+                if dev_ints == db_ints:
+                    if self.verbose:
+                        print(f"info: {d.pci_name} hwconfig blob from kernel "
+                              "matched database.")
+                    continue
+
+                db_ver = self.db.kernel_for_dev(d.pci_name)
+                if kernel_version_tuple < db_ver:
+                    if self.verbose:
+                        print(f"info: {d.pci_name} hwconfig blob mismatch, but "
+                              "database info is newer.")
+                    continue
+
+                modified += 1
+                self.db.add_device(d.hwconfig_bytes(), d.pci_name,
+                                   kernel_version)
+            if added or modified or self.args.rewrite:
+                self.db.save(force=self.args.rewrite)
+            if added or modified:
+                print("Updated hwconfig database: "
+                      f"{added} added, {modified} modified.")
+                if added > 0:
+                    print("\nInclude a reference to the product web page for "
+                          "added devices\nin the commit message!")
         else:
             assert False, f"Mode of {mode} is not supported"
 
@@ -866,11 +1014,17 @@ class HwconfigApp:
 
         sps = p.add_subparsers(dest="mode", help="Specifies the run mode")
 
+        sp = sps.add_parser("check-db")
+
         sp = sps.add_parser("display")
 
         sp = sps.add_parser("gen-sources")
         sp.add_argument("--h", help="Generate C header file")
         sp.add_argument("--c", help="Generate C source file")
+
+        sp = sps.add_parser("update-db")
+        sp.add_argument("--rewrite", action="store_true", default=False,
+                        help="Force rewrite of db file")
 
         a = p.parse_args()
 
