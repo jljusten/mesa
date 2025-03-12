@@ -26,7 +26,7 @@
 
 #include "intel_device_info.h"
 #include "intel_hwconfig.h"
-#include "intel_hwconfig_types.h"
+#include "intel_hwconfig_gen.h"
 #include "intel/common/intel_gem.h"
 #include "i915/intel_device_info.h"
 #include "xe/intel_device_info.h"
