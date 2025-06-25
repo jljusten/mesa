@@ -37,12 +37,13 @@ inc_intel_dev_virtio += [
 link_intel_dev_virtio += [ libvdrm ]
 endif
 
-intel_hwconfig_src = custom_target('intel_hwconfig_gen.[h]',
+intel_hwconfig_src = custom_target('intel_hwconfig_gen.[ch]',
                                  input : ['intel_hwconfig.py'],
-                                 output : ['intel_hwconfig_gen.h'],
+                                 output : ['intel_hwconfig_gen.h',
+                                           'intel_hwconfig_gen.c'],
                                  command : [prog_python,
                                             '@INPUT0@', 'gen-sources',
-                                            '--h=@OUTPUT0@'])
+                                            '--h=@OUTPUT0@', '--c=@OUTPUT1@'])
 
 intel_dev_wa_src = custom_target('intel_wa.[ch]',
                                  input : ['gen_wa_helpers.py', 'mesa_defs.json'],
