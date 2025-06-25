@@ -13,6 +13,27 @@ import re
 import sys
 
 
+mesa_hwconfigs_of_interest = list('''
+    INTEL_HWCONFIG_GEOMETRY_PIPES_PER_SLICE
+    INTEL_HWCONFIG_MAX_DS_URB_ENTRIES
+    INTEL_HWCONFIG_MAX_DUAL_SUBSLICES_SUPPORTED
+    INTEL_HWCONFIG_MAX_GS_URB_ENTRIES
+    INTEL_HWCONFIG_MAX_HS_URB_ENTRIES
+    INTEL_HWCONFIG_MAX_NUM_EU_PER_DSS
+    INTEL_HWCONFIG_MAX_SLICES_SUPPORTED
+    INTEL_HWCONFIG_MAX_SUBSLICE
+    INTEL_HWCONFIG_MAX_VS_URB_ENTRIES
+    INTEL_HWCONFIG_NUM_PIXEL_PIPES
+    INTEL_HWCONFIG_NUM_THREADS_PER_EU
+    INTEL_HWCONFIG_TOTAL_DS_THREADS
+    INTEL_HWCONFIG_TOTAL_GS_THREADS
+    INTEL_HWCONFIG_TOTAL_HS_THREADS
+    INTEL_HWCONFIG_TOTAL_PS_THREADS
+    INTEL_HWCONFIG_TOTAL_VS_THREADS
+    INTEL_HWCONFIG_URB_SIZE_PER_SLICE_IN_KB
+'''.strip().replace("INTEL_HWCONFIG_", "").split())
+
+
 class HwconfigTypes(enum.Enum):
 
     INTEL_HWCONFIG_MAX_SLICES_SUPPORTED = 1
@@ -148,6 +169,7 @@ C_TEMPLATE = """\
 
 #include <stdlib.h>
 #include "intel_hwconfig_gen.h"
+#include "util/macros.h"
 
 const char *
 intel_hwconfig_type_to_name(enum intel_hwconfig hwconfig_type)
@@ -181,6 +203,63 @@ intel_hwconfig_cache_type_to_name(enum intel_hwconfig_cache_type cache_type)
    default: return NULL;
    }
 }
+
+static int
+intel_mesa_hwconfig_index(enum intel_hwconfig type)
+{
+   switch (type) {
+% for e in enumerate(of_interest):
+   case INTEL_HWCONFIG_${e[1]}:
+      return ${e[0]};
+% endfor
+   default:
+      return -1;
+   }
+}
+
+bool
+intel_mesa_hwconfig_use_item(struct intel_mesa_hwconfig *dest,
+                             enum intel_hwconfig type, uint32_t len,
+                             const uint32_t *values)
+{
+   if (len != 1)
+      return false;
+
+   int index = intel_mesa_hwconfig_index(type);
+   assert(index < (int)ARRAY_SIZE(dest->is_valid.array));
+   if (index < 0)
+      return false;
+
+   dest->is_valid.array[index] = true;
+   dest->value.array[index] = values[0];
+   return true;
+}
+
+int
+intel_mesa_hwconfig_copy(struct intel_mesa_hwconfig *dest,
+                         const struct intel_mesa_hwconfig *src,
+                         bool only_missing)
+{
+   static_assert(sizeof(dest->is_valid.array) == ${len(of_interest)});
+% for e in enumerate(of_interest):
+   static_assert(offsetof(struct intel_mesa_hwconfig, is_valid.array[${e[0]}]) ==
+                 offsetof(struct intel_mesa_hwconfig, is_valid.${e[1]}));
+   static_assert(offsetof(struct intel_mesa_hwconfig, value.array[${e[0]}]) ==
+                 offsetof(struct intel_mesa_hwconfig, value.${e[1]}));
+% endfor
+
+   int updated = 0;
+   int i;
+   for (i = 0; i < ${len(of_interest)}; i++) {
+      if (src->is_valid.array[i] &&
+          (!only_missing || !dest->is_valid.array[i])) {
+         dest->is_valid.array[i] = true;
+         dest->value.array[i] = src->value.array[i];
+         updated++;
+      }
+   }
+   return updated;
+}
 """
 
 
@@ -194,6 +273,9 @@ H_TEMPLATE = """\
 
 #ifndef _INTEL_HWCONFIG_GEN_H_
 #define _INTEL_HWCONFIG_GEN_H_
+
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -217,6 +299,25 @@ enum intel_hwconfig_cache_type {
 % endfor
 };
 
+struct intel_mesa_hwconfig {
+   union {
+      uint32_t array[${len(of_interest)}];
+      struct {
+% for i in of_interest:
+         uint32_t ${i};
+% endfor
+      };
+   } value;
+   union {
+      bool array[${len(of_interest)}];
+      struct {
+% for i in of_interest:
+         bool ${i};
+% endfor
+      };
+   } is_valid;
+};
+
 const char *
 intel_hwconfig_type_to_name(enum intel_hwconfig);
 
@@ -225,6 +326,16 @@ intel_hwconfig_mem_type_to_name(enum intel_hwconfig_mem_type);
 
 const char *
 intel_hwconfig_cache_type_to_name(enum intel_hwconfig_cache_type);
+
+bool
+intel_mesa_hwconfig_use_item(struct intel_mesa_hwconfig *dest,
+                             enum intel_hwconfig type, uint32_t len,
+                             const uint32_t *values);
+
+int
+intel_mesa_hwconfig_copy(struct intel_mesa_hwconfig *dest,
+                         const struct intel_mesa_hwconfig *src,
+                         bool only_missing);
 
 #ifdef __cplusplus
 }
@@ -242,6 +353,7 @@ class GenHwconfigSources:
             "types": HwconfigTypes,
             "mem_types": HwconfigMemTypes,
             "cache_types": HwconfigCacheTypes,
+            "of_interest": mesa_hwconfigs_of_interest,
         }
         import mako.template
         self.c_template = mako.template.Template(C_TEMPLATE)
