@@ -194,12 +194,11 @@ main(int argc, char *argv[])
    drmDevicePtr devices[8];
    int max_devices, i;
    char c;
-   bool help = false, print_hwconfig = false, all = false, print_workarounds = false, print_json = false;
+   bool help = false, all = false, print_workarounds = false, print_json = false;
    const char *platform = NULL;
    const struct option opts[] = {
       { "help",              no_argument,  (int *) &help,              true },
       { "platform",    required_argument,  NULL,                       false },
-      { "hwconfig",          no_argument,  (int *) &print_hwconfig,    true },
       { "json",              no_argument,  (int *) &print_json,        true },
       { "workarounds",       no_argument,  (int *) &print_workarounds, true },
       { "all",               no_argument,  (int *) &all,               true },
@@ -235,7 +234,6 @@ main(int argc, char *argv[])
 
    if (all) {
       print_workarounds = true;
-      print_hwconfig = true;
    }
 
    if (platform) {
@@ -298,8 +296,6 @@ main(int argc, char *argv[])
 
          print_base_devinfo(&devinfo);
          print_regions_info(&devinfo);
-         if (print_hwconfig)
-            intel_get_and_print_hwconfig_table(fd, &devinfo);
          if (print_workarounds)
             print_wa_info(&devinfo);
 
