@@ -249,10 +249,79 @@ late_apply_hwconfig(struct intel_device_info *devinfo)
    }
 }
 
+static struct intel_mesa_hwconfig
+fill_intel_mesa_hwconfig_from_blob(void *data, int32_t len)
+{
+   struct intel_mesa_hwconfig blob_hwconfig = { 0 };
+   assert((len % 4) == 0);
+   int32_t len_dwords = len / 4;
+   uint32_t *blob_dwords = data;
+   for (int32_t i = 0; i < len_dwords; ) {
+      const enum intel_hwconfig type = blob_dwords[i];
+      const int32_t item_len = blob_dwords[i + 1];
+      const uint32_t *values = &blob_dwords[i + 2];
+      intel_mesa_hwconfig_use_item(&blob_hwconfig, type, item_len, values);
+      i += 2 + item_len;
+      assert(i <= len);
+   }
+   return blob_hwconfig;
+}
+
 bool
 intel_hwconfig_process_table(struct intel_device_info *devinfo,
                              void *data, int32_t len)
 {
+   struct intel_mesa_hwconfig blob_hwconfig =
+      fill_intel_mesa_hwconfig_from_blob(data, len);
+
+#define FILL_DEVINFO(dst_field, src_type)                       \
+   if (blob_hwconfig.is_valid.src_type)                         \
+      devinfo->dst_field = blob_hwconfig.value.src_type
+
+   if (blob_hwconfig.is_valid.TOTAL_PS_THREADS) {
+      unsigned threads = blob_hwconfig.value.TOTAL_PS_THREADS;
+      if (devinfo->ver == 12)
+         threads /= 2;
+      devinfo->max_threads_per_psd = threads;
+   }
+
+   FILL_DEVINFO(max_eus_per_subslice, MAX_NUM_EU_PER_DSS);
+   FILL_DEVINFO(num_thread_per_eu, NUM_THREADS_PER_EU);
+   FILL_DEVINFO(max_vs_threads, TOTAL_VS_THREADS);
+   FILL_DEVINFO(max_gs_threads, TOTAL_GS_THREADS);
+   FILL_DEVINFO(max_tcs_threads, TOTAL_HS_THREADS);
+   FILL_DEVINFO(max_tes_threads, TOTAL_DS_THREADS);
+
+   FILL_DEVINFO(urb.size, URB_SIZE_PER_SLICE_IN_KB);
+   FILL_DEVINFO(urb.max_entries[MESA_SHADER_VERTEX], MAX_VS_URB_ENTRIES);
+   FILL_DEVINFO(urb.max_entries[MESA_SHADER_TESS_CTRL], MAX_HS_URB_ENTRIES);
+   FILL_DEVINFO(urb.max_entries[MESA_SHADER_GEOMETRY], MAX_GS_URB_ENTRIES);
+   FILL_DEVINFO(urb.max_entries[MESA_SHADER_TESS_EVAL], MAX_DS_URB_ENTRIES);
+
+   FILL_DEVINFO(max_slices, MAX_SLICES_SUPPORTED);
+
+   if (devinfo->verx10 >= 200) {
+      FILL_DEVINFO(num_color_pipes, NUM_PIXEL_PIPES);
+      devinfo->num_color_pipes *= devinfo->max_slices;
+      devinfo->num_depth_pipes =  devinfo->num_color_pipes;
+      FILL_DEVINFO(num_geom_pipes, GEOMETRY_PIPES_PER_SLICE);
+      devinfo->num_geom_pipes  *= devinfo->max_slices;
+   }
+
+   if (devinfo->verx10 >= 300) {
+      if (blob_hwconfig.is_valid.MAX_SLICES_SUPPORTED &&
+          blob_hwconfig.is_valid.MAX_SUBSLICE) {
+         assert((blob_hwconfig.value.MAX_SUBSLICE %
+                 blob_hwconfig.value.MAX_SLICES_SUPPORTED) == 0);
+         devinfo->max_subslices_per_slice =
+            blob_hwconfig.value.MAX_SUBSLICE /
+            blob_hwconfig.value.MAX_SLICES_SUPPORTED;
+      } else {
+         mesa_logw("Unable to calculate max_subslices_per_slice.");
+      }
+   }
+#undef FILL_DEVINFO
+
    if (intel_hwconfig_is_required(devinfo)) {
       process_hwconfig_table(devinfo, data, len, apply_hwconfig_item);
       late_apply_hwconfig(devinfo);
