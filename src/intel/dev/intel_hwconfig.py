@@ -362,6 +362,15 @@ class HwconfigItem:
         result += self.values
         return result
 
+    @property
+    def name(self):
+        return HwconfigTypes.to_name(self.key)
+
+    @property
+    def value(self):
+        assert len(self.values) == 1
+        return self.values[0]
+
     def for_humans(self):
         k = HwconfigTypes.to_name(self.key)
         return [k, len(self.values)] + self.values
@@ -408,6 +417,15 @@ class Hwconfig:
 
     def to_ints(self):
         return Hwconfig.blob_to_ints(self._bytes)
+
+    def for_mako(self):
+        decoded = Hwconfig.decode_blob(self._bytes)
+        of_interest = ((h.name.replace("INTEL_HWCONFIG_", ""), h)
+                       for h in decoded)
+        of_interest = (h for h in of_interest
+                       if h[0] in mesa_hwconfigs_of_interest)
+        of_interest = sorted([(h[0], h[1].value) for h in of_interest])
+        return of_interest
 
     @staticmethod
     def encode_blob(decoded_blob):
@@ -483,6 +501,25 @@ class Hwconfigs:
                    "hwconfig_blob": r["hwconfig"].for_json(), }
                   for r in result]
         return result
+
+    def for_mako(self):
+        mako_hwconfigs = list({h["hwconfig"]
+                               for h in self.dev_to_hwconfig.values()})
+        hwc_to_idx = {e[1]: e[0] for e in enumerate(mako_hwconfigs)}
+        mako_hwconfigs = [h.for_mako() for h in mako_hwconfigs]
+        mako_dev = [(pci, list(pci.split(":")))
+                    for pci in self.dev_to_hwconfig]
+        mako_dev = list(sorted((int(p[1][1], 0), int(p[1][2], 0),
+                                self.dev_to_hwconfig[p[0]]["hwconfig"])
+                               for p in mako_dev))
+        mako_dev = [{"dev_id": dev[0],
+                     "rev_id": dev[1],
+                     "hwconfig_idx": hwc_to_idx[dev[2]]}
+                    for dev in mako_dev]
+        return {
+            "hwconfigs": mako_hwconfigs,
+            "devices": mako_dev,
+        }
 
 
 class HwconfigJson:
@@ -685,6 +722,9 @@ class HwconfigDb:
     def display(self):
         print(HwconfigJson().dumps(self.db))
 
+    def for_mako(self):
+        return self.hwconfigs.for_mako()
+
 
 C_TEMPLATE = """\
 /*
@@ -787,6 +827,51 @@ intel_mesa_hwconfig_copy(struct intel_mesa_hwconfig *dest,
    }
    return updated;
 }
+
+#define SET_EMBEDDED_VALUE(n, v) .is_valid.n = true, .value.n = v
+
+static const struct intel_mesa_hwconfig
+embedded_hwconfigs[] = {
+% for eh in embedded_hwconfig["hwconfigs"]:
+   {
+% for eh_field in eh:
+      SET_EMBEDDED_VALUE(${eh_field[0]}, ${eh_field[1]}),
+% endfor
+   },
+% endfor
+};
+
+struct embedded_device {
+   uint16_t dev_id;
+   uint8_t rev_id;
+   uint16_t hwconfig_idx;
+};
+
+static const struct embedded_device
+embedded_devices[] = {
+% for dev in embedded_hwconfig["devices"]:
+   {
+      .dev_id = ${f"0x{dev['dev_id']:04x}"},
+      .rev_id = ${dev["rev_id"]},
+      .hwconfig_idx = ${dev["hwconfig_idx"]},
+   },
+% endfor
+};
+
+const struct intel_mesa_hwconfig *
+intel_get_mesa_embedded_hwconfig(uint16_t dev_id, uint8_t rev_id)
+{
+   const struct embedded_device *dev = &embedded_devices[0];
+   const struct embedded_device *end_dev = dev + ARRAY_SIZE(embedded_devices);
+   for ( ; dev < end_dev; dev++) {
+      if (dev->dev_id == dev_id && dev->rev_id == rev_id) {
+         assert(dev->hwconfig_idx < ARRAY_SIZE(embedded_hwconfigs));
+         return &embedded_hwconfigs[dev->hwconfig_idx];
+      }
+
+   }
+   return NULL;
+}
 """
 
 
@@ -864,6 +949,9 @@ intel_mesa_hwconfig_copy(struct intel_mesa_hwconfig *dest,
                          const struct intel_mesa_hwconfig *src,
                          bool only_missing);
 
+const struct intel_mesa_hwconfig *
+intel_get_mesa_embedded_hwconfig(uint16_t dev_id, uint8_t rev_id);
+
 #ifdef __cplusplus
 }
 #endif
@@ -874,8 +962,9 @@ intel_mesa_hwconfig_copy(struct intel_mesa_hwconfig *dest,
 
 class GenHwconfigSources:
 
-    def __init__(self, args):
+    def __init__(self, args, db):
         self.args = args
+        self.db = db
         self.template_input = {
             "types": HwconfigTypes,
             "mem_types": HwconfigMemTypes,
@@ -896,9 +985,13 @@ class GenHwconfigSources:
             print("info: No sources specified to be generated")
         return gen_count > 0
 
+    def __update_template_input(self):
+        self.template_input["embedded_hwconfig"] = self.db.for_mako()
+
     def gen_c_source(self):
         if self.args.c is None:
             return False
+        self.__update_template_input()
         with open(self.args.c, 'w', encoding='utf8') as c:
             c.write(self.c_template.render(**self.template_input))
         return True
@@ -906,6 +999,7 @@ class GenHwconfigSources:
     def gen_h_source(self):
         if self.args.h is None:
             return False
+        self.__update_template_input()
         with open(self.args.h, 'w', encoding='utf8') as h:
             h.write(self.h_template.render(**self.template_input))
         return True
@@ -948,7 +1042,8 @@ class HwconfigApp:
                           "database info is newer.")
             sys.exit(0 if ok else 1)
         elif mode == "gen-sources":
-            self.gen_sources = GenHwconfigSources(self.args)
+            self.db = HwconfigDb()
+            self.gen_sources = GenHwconfigSources(self.args, self.db)
             sys.exit(0 if self.gen_sources.gen() else 1)
         elif mode == "display":
             self.drm_devs = DrmDevices(self.args)
