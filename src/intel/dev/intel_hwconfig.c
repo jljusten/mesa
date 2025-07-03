@@ -103,6 +103,15 @@ intel_hwconfig_process_table(struct intel_device_info *devinfo,
    struct intel_mesa_hwconfig blob_hwconfig =
       fill_intel_mesa_hwconfig_from_blob(data, len);
 
+   const struct intel_mesa_hwconfig *embedded_hwconfig =
+      intel_get_mesa_embedded_hwconfig(devinfo->pci_device_id,
+                                       devinfo->pci_revision_id);
+
+   bool prefer_kernel_hwconfig = true;
+   if (embedded_hwconfig)
+      intel_mesa_hwconfig_copy(&blob_hwconfig, embedded_hwconfig,
+                               prefer_kernel_hwconfig);
+
 #define FILL_DEVINFO(dst_field, src_type)                       \
    if (blob_hwconfig.is_valid.src_type)                         \
       devinfo->dst_field = blob_hwconfig.value.src_type
