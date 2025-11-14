@@ -1,0 +1,1578 @@
+/*
+ * Copyright © 2025 Intel Corporation
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <array>
+#include <stdio.h>
+#include <string.h>
+
+#include "util/ralloc.h"
+
+#include "gen_private.h"
+
+static inline enum gfx12_systolic_depth
+encode_sdepth(unsigned d)
+{
+   switch (d) {
+   case 2:  return BRW_SYSTOLIC_DEPTH_2;
+   case 4:  return BRW_SYSTOLIC_DEPTH_4;
+   case 8:  return BRW_SYSTOLIC_DEPTH_8;
+   case 16: return BRW_SYSTOLIC_DEPTH_16;
+   default: UNREACHABLE("Invalid systolic depth.");
+   }
+}
+
+static inline unsigned
+decode_sdepth(unsigned d)
+{
+   switch (d) {
+   case BRW_SYSTOLIC_DEPTH_2:  return 2;
+   case BRW_SYSTOLIC_DEPTH_4:  return 4;
+   case BRW_SYSTOLIC_DEPTH_8:  return 8;
+   case BRW_SYSTOLIC_DEPTH_16: return 16;
+   default: UNREACHABLE("Invalid systolic depth.");
+   }
+}
+
+static inline unsigned
+brw_implied_width_for_3src_a1(unsigned v, unsigned h)
+{
+   /* "Regioning Rules for Align1 Ternary Operations" */
+
+   /* TODO: Add remaining rules and de-duplicate with brw_disasm.c */
+
+   if (v == 0) return 1;
+   if (h == 0) return v;
+   return v/h;
+}
+
+static void
+report_error(char **error, const char *msg)
+{
+   assert(error);
+
+   if (*error) {
+      ralloc_asprintf_append(error, "\tERROR: %s\n", msg);
+   } else {
+      *error = ralloc_asprintf(NULL, "\tERROR: %s\n", msg);
+   }
+}
+
+#define ERROR(msg) ERROR_IF(true, msg)
+#define ERROR_IF(cond, msg)                             \
+   do {                                                 \
+      if ((cond))                                       \
+         report_error(error, msg);                      \
+   } while(0)
+
+#define RETURN_ERROR(msg) RETURN_ERROR_IF(true, msg)
+#define RETURN_ERROR_IF(cond, msg)                      \
+   do {                                                 \
+      if ((cond)) {                                     \
+         report_error(error, msg);                      \
+         return;                                        \
+      }                                                 \
+   } while(0)
+
+static bool
+inst_has_type(const intel_device_info *devinfo, const gen_inst *inst,
+              enum brw_reg_type type)
+{
+   if (inst->dst.file != GEN_BAD_FILE && inst->dst.type == type)
+      return true;
+
+   // TODO: Just do array size thing here too?
+   const unsigned num_sources = gen_inst_num_sources(devinfo, inst);
+   for (unsigned i = 0; i < num_sources; i++) {
+      if (inst->src[i].type == type)
+         return true;
+   }
+
+   return false;
+}
+
+bool
+gen_inst_is_unordered(const intel_device_info *devinfo,
+                      const gen_inst *inst)
+{
+   // TODO: See if we can do better.
+
+   return
+      inst->opcode == GEN_OP_SEND || inst->opcode == GEN_OP_SENDC ||
+      inst->opcode == GEN_OP_SENDS || inst->opcode == GEN_OP_SENDSC ||
+      inst->opcode == GEN_OP_MATH || inst->opcode == GEN_OP_DPAS ||
+      (devinfo->has_64bit_float_via_math_pipe &&
+       inst_has_type(devinfo, inst, BRW_TYPE_DF));
+}
+
+enum gen_encoding_type {
+   GEN_ENCODING_XE,
+   GEN_ENCODING_XE2,
+};
+
+#define FIELD(name, high, low) \
+   static constexpr gen_range name = { .hi = high, .lo = low };
+
+#define SUB_FIELD(name, high, low) \
+   static constexpr gen_sub_range name = { .hi = high, .lo = low };
+
+/* Provide some clue in the compiler error if this gets used wrongly. */
+struct gen_invalid_range {};
+
+#define DELETE_FIELD(name)                       \
+   static constexpr gen_invalid_range name = {};
+
+struct gen_inst_description {
+   gen_opcode gen_op = GEN_OP_ILLEGAL;
+   gen_format format = GEN_FORMAT_ILLEGAL;
+   unsigned hw_opcode = 0;
+   bool has_dst = false;
+
+   constexpr gen_inst_description() = default;
+
+   constexpr gen_inst_description(gen_opcode op, unsigned hw)
+      : gen_op(op),
+        format(gen_inst_format(op)),
+        hw_opcode(hw),
+        has_dst(gen_inst_has_dst(format, op))
+   {}
+};
+
+static constexpr
+std::array<gen_inst_description, 128> gen_sort_by_hw_opcode(const std::array<gen_inst_description, 128> &table) {
+   std::array<gen_inst_description, 128> r;
+   for (const auto &d : table)
+      r[d.hw_opcode] = d;
+   return r;
+}
+
+struct gen_encoding_xe {
+   static constexpr gen_encoding_type TYPE = GEN_ENCODING_XE;
+
+   /* These are commons to various formats. */
+   FIELD(HW_OPCODE,           6,   0);
+   FIELD(SWSB,               15,   8);
+   FIELD(EXEC_SIZE,          18,  16);
+   FIELD(CHAN_OFFSET,        21,  19);
+   FIELD(FLAG_SUBNR,         22,  22);
+   FIELD(FLAG_NR,            23,  23);
+   FIELD(PRED_CONTROL,       27,  24);
+   FIELD(PRED_INV,           28,  28);
+   FIELD(DEBUG_CONTROL,      30,  30);
+   FIELD(NO_MASK,            31,  31);
+   FIELD(ATOMIC_CONTROL,     32,  32);
+   FIELD(SATURATE,           34,  34);
+   FIELD(DST_ADDRESS_MODE,   35,  35);
+   FIELD(DST_TYPE,           39,  36);
+   FIELD(SRC0_TYPE,          43,  40);
+   FIELD(SRC0_ABS,           44,  44);
+   FIELD(SRC0_NEGATE,        45,  45);
+   FIELD(SRC0_IS_IMM,        46,  46);
+   FIELD(SRC1_IS_IMM,        47,  47);
+   FIELD(DST_HSTRIDE,        49,  48);
+   FIELD(DST_OPERAND,        63,  50);
+   FIELD(SRC0_HSTRIDE,       65,  64);
+   FIELD(SRC0_OPERAND,       79,  66);
+   FIELD(SRC0_ADDRESS_MODE,  80,  80);
+   FIELD(SRC0_WIDTH,         83,  81);
+   FIELD(SRC0_VSTRIDE,       87,  84);
+   FIELD(SRC1_TYPE,          91,  88);
+   FIELD(COND_MODIFIER,      95,  92);
+   FIELD(SRC1_HSTRIDE,       97,  96);
+   FIELD(SRC1_OPERAND,      111,  98);
+   FIELD(SRC1_ADDRESS_MODE, 112, 112);
+   FIELD(SRC1_WIDTH,        115, 113);
+   FIELD(SRC1_VSTRIDE,      119, 116);
+   FIELD(SRC1_ABS,          120, 120);
+   FIELD(SRC1_NEGATE,       121, 121);
+
+   FIELD(BRANCH_CONTROL,     33,  33);
+   FIELD(ACC_WR_CONTROL,     33,  33);
+
+   FIELD(IMM_LO_32,         127,  96);
+   FIELD(IMM_HI_32,          95,  64);
+
+   /* EU_INSTRUCTION_BASIC_THREE_SRC. */
+   FIELD(THREE_SRC0_VSTRIDE_LO,     35,  35);
+   FIELD(THREE_DST_TYPE,            38,  36);
+   FIELD(THREE_EXEC_DATA_TYPE,      39,  39);
+   FIELD(THREE_SRC0_TYPE,           42,  40);
+   FIELD(THREE_SRC0_VSTRIDE_HI,     43,  43);
+   FIELD(THREE_SRC2_IS_IMM,         47,  47);
+   FIELD(THREE_DST_HSTRIDE,         48,  48);
+   FIELD(THREE_DST_OPERAND,         63,  50);
+   FIELD(THREE_SRC0_HSTRIDE,        65,  64);
+   FIELD(THREE_SRC0_OPERAND,        79,  66);
+   FIELD(THREE_SRC2_TYPE,           82,  80);
+   FIELD(THREE_SRC1_VSTRIDE_LO,     83,  83);
+   FIELD(THREE_SRC2_ABS,            84,  84);
+   FIELD(THREE_SRC2_NEGATE,         85,  85);
+   FIELD(THREE_SRC1_ABS,            86,  86);
+   FIELD(THREE_SRC1_NEGATE,         87,  87);
+   FIELD(THREE_SRC1_TYPE,           90,  88);
+   FIELD(THREE_SRC1_VSTRIDE_HI,     91,  91);
+   FIELD(THREE_SRC1_HSTRIDE,        97,  96);
+   FIELD(THREE_SRC1_OPERAND,       111,  98);
+   FIELD(THREE_SRC2_HSTRIDE,       113, 112);
+   FIELD(THREE_SRC2_OPERAND,       127, 114);
+
+   FIELD(THREE_SRC0_IMM,            79,  64);
+   FIELD(THREE_SRC2_IMM,           127, 112);
+
+   /* EU_INSTRUCTION_BFN. */
+   FIELD(BFN_COND_MODIFIER,    45,  44);
+   FIELD(BFN_FUNC_CONTROL_HI,  95,  92);
+   FIELD(BFN_FUNC_CONTROL_LO,  87,  84);
+
+   /* EU_INSTRUCTION_DPAS_THREE_SRC. */
+   FIELD(DPAS_RCOUNT,          45,  43);
+   FIELD(DPAS_SDEPTH,          49,  48);
+   FIELD(DPAS_SRC2_SUBBYTE,    85,  84);
+   FIELD(DPAS_SRC1_SUBBYTE,    87,  86);
+
+   /* EU_INSTRUCTION_SEND. */
+   FIELD(SEND_FUSION_CONTROL,  33,  33);
+   FIELD(SEND_EOT,             34,  34);
+   FIELD(SEND_EX_BSO,          39,  39);
+   FIELD(SEND_DESC_IS_REG,     48,  48);
+   FIELD(SEND_EX_DESC_IS_REG,  49,  49);
+   FIELD(SEND_SFID,            95,  92);
+
+   FIELD(SEND_SRC0_SUB_NR,    103,  99);
+   FIELD(SEND_SRC1_LEN,       103,  99);
+
+   static constexpr std::array<gen_inst_description, 128> gen_to_description = []() constexpr {
+      std::array<gen_inst_description, 128> r;
+      r[GEN_OP_ILLEGAL]  = gen_inst_description(GEN_OP_ILLEGAL, 0);
+      r[GEN_OP_ADD]      = gen_inst_description(GEN_OP_ADD, 64);
+      r[GEN_OP_ADD3]     = gen_inst_description(GEN_OP_ADD3, 82);
+      r[GEN_OP_ADDC]     = gen_inst_description(GEN_OP_ADDC, 78);
+      r[GEN_OP_AND]      = gen_inst_description(GEN_OP_AND, 101);
+      r[GEN_OP_ASR]      = gen_inst_description(GEN_OP_ASR, 108);
+      r[GEN_OP_AVG]      = gen_inst_description(GEN_OP_AVG, 66);
+      r[GEN_OP_BFE]      = gen_inst_description(GEN_OP_BFE, 120);
+      r[GEN_OP_BFI1]     = gen_inst_description(GEN_OP_BFI1, 121);
+      r[GEN_OP_BFI2]     = gen_inst_description(GEN_OP_BFI2, 122);
+      r[GEN_OP_BFN]      = gen_inst_description(GEN_OP_BFN, 107);
+      r[GEN_OP_BFREV]    = gen_inst_description(GEN_OP_BFREV, 119);
+      r[GEN_OP_BRC]      = gen_inst_description(GEN_OP_BRC, 35);
+      r[GEN_OP_BRD]      = gen_inst_description(GEN_OP_BRD, 33);
+      r[GEN_OP_BREAK]    = gen_inst_description(GEN_OP_BREAK, 40);
+      r[GEN_OP_CALL]     = gen_inst_description(GEN_OP_CALL, 44);
+      r[GEN_OP_CALLA]    = gen_inst_description(GEN_OP_CALLA, 43);
+      r[GEN_OP_CBIT]     = gen_inst_description(GEN_OP_CBIT, 77);
+      r[GEN_OP_CMP]      = gen_inst_description(GEN_OP_CMP, 112);
+      r[GEN_OP_CMPN]     = gen_inst_description(GEN_OP_CMPN, 113);
+      r[GEN_OP_CONTINUE] = gen_inst_description(GEN_OP_CONTINUE, 41);
+      r[GEN_OP_CSEL]     = gen_inst_description(GEN_OP_CSEL, 114);
+      r[GEN_OP_DP4A]     = gen_inst_description(GEN_OP_DP4A, 88);
+      r[GEN_OP_DPAS]     = gen_inst_description(GEN_OP_DPAS, 89);
+      r[GEN_OP_ELSE]     = gen_inst_description(GEN_OP_ELSE, 36);
+      r[GEN_OP_ENDIF]    = gen_inst_description(GEN_OP_ENDIF, 37);
+      r[GEN_OP_FBH]      = gen_inst_description(GEN_OP_FBH, 75);
+      r[GEN_OP_FBL]      = gen_inst_description(GEN_OP_FBL, 76);
+      r[GEN_OP_FRC]      = gen_inst_description(GEN_OP_FRC, 67);
+      r[GEN_OP_GOTO]     = gen_inst_description(GEN_OP_GOTO, 46);
+      r[GEN_OP_HALT]     = gen_inst_description(GEN_OP_HALT, 42);
+      r[GEN_OP_IF]       = gen_inst_description(GEN_OP_IF, 34);
+      r[GEN_OP_JMPI]     = gen_inst_description(GEN_OP_JMPI, 32);
+      r[GEN_OP_JOIN]     = gen_inst_description(GEN_OP_JOIN, 47);
+      r[GEN_OP_LZD]      = gen_inst_description(GEN_OP_LZD, 74);
+      r[GEN_OP_MAC]      = gen_inst_description(GEN_OP_MAC, 72);
+      r[GEN_OP_MACH]     = gen_inst_description(GEN_OP_MACH, 73);
+      r[GEN_OP_MAD]      = gen_inst_description(GEN_OP_MAD, 91);
+      r[GEN_OP_MADM]     = gen_inst_description(GEN_OP_MADM, 93);
+      r[GEN_OP_MATH]     = gen_inst_description(GEN_OP_MATH, 56);
+      r[GEN_OP_MOV]      = gen_inst_description(GEN_OP_MOV, 97);
+      r[GEN_OP_MOVI]     = gen_inst_description(GEN_OP_MOVI, 99);
+      r[GEN_OP_MUL]      = gen_inst_description(GEN_OP_MUL, 65);
+      r[GEN_OP_NOP]      = gen_inst_description(GEN_OP_NOP, 96);
+      r[GEN_OP_NOT]      = gen_inst_description(GEN_OP_NOT, 100);
+      r[GEN_OP_OR]       = gen_inst_description(GEN_OP_OR, 102);
+      r[GEN_OP_RET]      = gen_inst_description(GEN_OP_RET, 45);
+      r[GEN_OP_RNDD]     = gen_inst_description(GEN_OP_RNDD, 69);
+      r[GEN_OP_RNDE]     = gen_inst_description(GEN_OP_RNDE, 70);
+      r[GEN_OP_RNDU]     = gen_inst_description(GEN_OP_RNDU, 68);
+      r[GEN_OP_RNDZ]     = gen_inst_description(GEN_OP_RNDZ, 71);
+      r[GEN_OP_ROL]      = gen_inst_description(GEN_OP_ROL, 111);
+      r[GEN_OP_ROR]      = gen_inst_description(GEN_OP_ROR, 110);
+      r[GEN_OP_SEL]      = gen_inst_description(GEN_OP_SEL, 98);
+      r[GEN_OP_SEND]     = gen_inst_description(GEN_OP_SEND, 49);
+      r[GEN_OP_SENDC]    = gen_inst_description(GEN_OP_SENDC, 50);
+      r[GEN_OP_SHL]      = gen_inst_description(GEN_OP_SHL, 105);
+      r[GEN_OP_SHR]      = gen_inst_description(GEN_OP_SHR, 104);
+      r[GEN_OP_SMOV]     = gen_inst_description(GEN_OP_SMOV, 106);
+      r[GEN_OP_SUBB]     = gen_inst_description(GEN_OP_SUBB, 79);
+      r[GEN_OP_SYNC]     = gen_inst_description(GEN_OP_SYNC, 1);
+      r[GEN_OP_WAIT]     = gen_inst_description(GEN_OP_WAIT, 48);
+      r[GEN_OP_WHILE]    = gen_inst_description(GEN_OP_WHILE, 39);
+      r[GEN_OP_XOR]      = gen_inst_description(GEN_OP_XOR, 103);
+      return r;
+   }();
+
+   static constexpr std::array<gen_inst_description, 128> hw_to_description = gen_sort_by_hw_opcode(gen_to_description);
+};
+
+struct gen_encoding_xe2 : gen_encoding_xe {
+   static constexpr gen_encoding_type TYPE = GEN_ENCODING_XE2;
+
+   FIELD(SWSB,                17,   8);
+   FIELD(EXEC_SIZE,           20,  18);
+
+   FIELD(FLAG_SUBNR,          21,  21);
+   FIELD(FLAG_NR,             23,  22);
+   FIELD(CHAN_OFFSET,         25,  24);
+   FIELD(PRED_CONTROL,        27,  26);
+
+   FIELD(SRC0_VSTRIDE,        86,  84);
+   FIELD(SRC1_VSTRIDE,       118, 116);
+
+   FIELD(DST_OPERAND_EXTRA,   33,  33);
+   FIELD(SRC0_OPERAND_EXTRA,  87,  87);
+
+   DELETE_FIELD(ACC_WR_CONTROL);
+   DELETE_FIELD(NIB_CONTROL);
+   DELETE_FIELD(SEND_FUSION_CONTROL);
+
+   static constexpr std::array<gen_inst_description, 128> gen_to_description = []() constexpr {
+      auto r = gen_encoding_xe::gen_to_description;
+      r[GEN_OP_SRND]     = gen_inst_description(GEN_OP_SRND, 84);
+      return r;
+   }();
+
+   /* Redefine to use updated array above. */
+   static constexpr std::array<gen_inst_description, 128> hw_to_description = gen_sort_by_hw_opcode(gen_to_description);
+};
+
+#undef FIELD
+
+// TODO: Cleanup, use gen_format, move to encoder/decoder
+static inline uint32_t
+gen_swsb_encode(const struct intel_device_info *devinfo,
+                struct tgl_swsb swsb, gen_opcode op)
+{
+   if (!swsb.mode) {
+      const unsigned pipe = devinfo->verx10 < 125 ? 0 :
+         swsb.pipe == TGL_PIPE_FLOAT ? 0x10 :
+         swsb.pipe == TGL_PIPE_INT ? 0x18 :
+         swsb.pipe == TGL_PIPE_LONG ? 0x20 :
+         swsb.pipe == TGL_PIPE_MATH ? 0x28 :
+         swsb.pipe == TGL_PIPE_SCALAR ? 0x30 :
+         swsb.pipe == TGL_PIPE_ALL ? 0x8 : 0;
+      return pipe | swsb.regdist;
+
+   } else if (swsb.regdist) {
+      if (devinfo->ver >= 20) {
+         unsigned mode = 0;
+         if (op == GEN_OP_DPAS) {
+            mode = (swsb.mode & TGL_SBID_SET) ? 0b01 :
+                   (swsb.mode & TGL_SBID_SRC) ? 0b10 :
+                 /* swsb.mode & TGL_SBID_DST */ 0b11;
+         } else if (swsb.mode & TGL_SBID_SET) {
+            assert(op == GEN_OP_SEND || op == GEN_OP_SENDC);
+            assert(swsb.pipe == TGL_PIPE_ALL ||
+                   swsb.pipe == TGL_PIPE_INT ||
+                   swsb.pipe == TGL_PIPE_FLOAT);
+
+            mode = swsb.pipe == TGL_PIPE_INT   ? 0b11 :
+                   swsb.pipe == TGL_PIPE_FLOAT ? 0b10 :
+                /* swsb.pipe == TGL_PIPE_ALL  */ 0b01;
+         } else {
+            assert(!(swsb.mode & ~(TGL_SBID_DST | TGL_SBID_SRC)));
+            mode = swsb.pipe == TGL_PIPE_ALL  ? 0b11 :
+                   swsb.mode == TGL_SBID_SRC  ? 0b10 :
+                /* swsb.mode == TGL_SBID_DST */ 0b01;
+         }
+         return mode << 8 | swsb.regdist << 5 | swsb.sbid;
+      } else {
+         assert(!(swsb.sbid & ~0xfu));
+         return 0x80 | swsb.regdist << 4 | swsb.sbid;
+      }
+
+   } else {
+      if (devinfo->ver >= 20) {
+         return swsb.sbid | (swsb.mode & TGL_SBID_SET ? 0xc0 :
+                             swsb.mode & TGL_SBID_DST ? 0x80 : 0xa0);
+      } else {
+         assert(!(swsb.sbid & ~0xfu));
+         return swsb.sbid | (swsb.mode & TGL_SBID_SET ? 0x40 :
+                             swsb.mode & TGL_SBID_DST ? 0x20 : 0x30);
+      }
+   }
+}
+
+/**
+ * Convert the provided binary representation of an SWSB annotation to a
+ * tgl_swsb.
+ */
+static inline struct tgl_swsb
+gen_swsb_decode(const struct intel_device_info *devinfo,
+                const bool is_unordered, const uint32_t x, gen_opcode op)
+{
+   if (devinfo->ver >= 20) {
+      if (x & 0x300) {
+         /* Mode isn't SingleInfo, there's a tuple */
+         if (op == GEN_OP_SEND || op == GEN_OP_SENDC) {
+            const struct tgl_swsb swsb = {
+               (x & 0xe0u) >> 5,
+               ((x & 0x300) == 0x300 ? TGL_PIPE_INT :
+                (x & 0x300) == 0x200 ? TGL_PIPE_FLOAT :
+                TGL_PIPE_ALL),
+               x & 0x1fu,
+               TGL_SBID_SET
+            };
+            return swsb;
+         } else if (op == GEN_OP_DPAS) {
+            const struct tgl_swsb swsb = {
+               .regdist = (x & 0xe0u) >> 5,
+               .pipe = TGL_PIPE_NONE,
+               .sbid = x & 0x1fu,
+               .mode = (x & 0x300) == 0x300 ? TGL_SBID_DST :
+                       (x & 0x300) == 0x200 ? TGL_SBID_SRC :
+                                              TGL_SBID_SET,
+            };
+            return swsb;
+         } else {
+            const struct tgl_swsb swsb = {
+               (x & 0xe0u) >> 5,
+               ((x & 0x300) == 0x300 ? TGL_PIPE_ALL : TGL_PIPE_NONE),
+               x & 0x1fu,
+               ((x & 0x300) == 0x200 ? TGL_SBID_SRC : TGL_SBID_DST)
+            };
+            return swsb;
+         }
+
+      } else if ((x & 0xe0) == 0x80) {
+         return tgl_swsb_sbid(TGL_SBID_DST, x & 0x1f);
+      } else if ((x & 0xe0) == 0xa0) {
+         return tgl_swsb_sbid(TGL_SBID_SRC, x & 0x1fu);
+      } else if ((x & 0xe0) == 0xc0) {
+         return tgl_swsb_sbid(TGL_SBID_SET, x & 0x1fu);
+      } else {
+            const struct tgl_swsb swsb = { x & 0x7u,
+                                           ((x & 0x38) == 0x10 ? TGL_PIPE_FLOAT :
+                                            (x & 0x38) == 0x18 ? TGL_PIPE_INT :
+                                            (x & 0x38) == 0x20 ? TGL_PIPE_LONG :
+                                            (x & 0x38) == 0x28 ? TGL_PIPE_MATH :
+                                            (x & 0x38) == 0x30 ? TGL_PIPE_SCALAR :
+                                            (x & 0x38) == 0x8 ? TGL_PIPE_ALL :
+                                            TGL_PIPE_NONE) };
+            return swsb;
+      }
+
+   } else {
+      if (x & 0x80) {
+         const struct tgl_swsb swsb = { (x & 0x70u) >> 4, TGL_PIPE_NONE,
+                                        x & 0xfu,
+                                        is_unordered ?
+                                        TGL_SBID_SET : TGL_SBID_DST };
+         return swsb;
+      } else if ((x & 0x70) == 0x20) {
+         return tgl_swsb_sbid(TGL_SBID_DST, x & 0xfu);
+      } else if ((x & 0x70) == 0x30) {
+         return tgl_swsb_sbid(TGL_SBID_SRC, x & 0xfu);
+      } else if ((x & 0x70) == 0x40) {
+         return tgl_swsb_sbid(TGL_SBID_SET, x & 0xfu);
+      } else {
+         const struct tgl_swsb swsb = { x & 0x7u,
+                                        ((x & 0x78) == 0x10 ? TGL_PIPE_FLOAT :
+                                         (x & 0x78) == 0x18 ? TGL_PIPE_INT :
+                                         (x & 0x78) == 0x50 ? TGL_PIPE_LONG :
+                                         (x & 0x78) == 0x8 ? TGL_PIPE_ALL :
+                                         TGL_PIPE_NONE) };
+         assert(devinfo->verx10 >= 125 || swsb.pipe == TGL_PIPE_NONE);
+         return swsb;
+      }
+   }
+}
+
+
+/* E is the struct with the Encoding fields and type. */
+template <typename E>
+struct gen_encoder {
+   const intel_device_info *devinfo;
+
+   const gen_inst *inst;
+   gen_raw_inst *raw;
+   const gen_inst_description *desc;
+
+   gen_encoder(const intel_device_info *devinfo)
+      : devinfo(devinfo) {}
+
+   void
+   encode(const gen_inst *inst, gen_raw_inst *raw)
+   {
+      this->inst = inst;
+      this->raw = raw;
+      this->desc = &E::gen_to_description[inst->opcode];
+
+      memset(raw, 0, sizeof(gen_raw_inst));
+
+      assert(!inst->align16);
+
+      gen_range bits = { 127, 0 };
+
+      set(E::HW_OPCODE,      desc->hw_opcode);
+      set(E::SWSB,           gen_swsb_encode(devinfo, inst->swsb, inst->opcode));
+      set(E::EXEC_SIZE,      cvt(inst->exec_size) - 1);
+      set(E::FLAG_SUBNR,     inst->flag_subnr);
+      set(E::FLAG_NR,        inst->flag_nr);
+      set(E::PRED_CONTROL,   inst->pred_control);
+      set(E::PRED_INV,       inst->pred_inv);
+      set(E::DEBUG_CONTROL,  inst->debug_control);
+      set(E::NO_MASK,        inst->no_mask);
+      set(E::ATOMIC_CONTROL, inst->atomic_control);
+
+      if constexpr (E::TYPE == GEN_ENCODING_XE)
+         set(E::CHAN_OFFSET, inst->chan_offset / 4);
+      else
+         set(E::CHAN_OFFSET, inst->chan_offset / 8);
+
+      if (gen_inst_has_saturate(desc->format, inst))
+         set(E::SATURATE, inst->saturate);
+
+      if (gen_inst_has_cond_modifier(desc->format, inst)) {
+         if (inst->opcode == GEN_OP_BFN) {
+            /* BFN supports only a few conditional modifiers. */
+            const unsigned encoded_bfn_cmod =
+               inst->cond_modifier == BRW_CONDITIONAL_Z ? 1 :
+               inst->cond_modifier == BRW_CONDITIONAL_G ? 2 :
+               inst->cond_modifier == BRW_CONDITIONAL_L ? 3 : 0;
+            set(E::BFN_COND_MODIFIER, encoded_bfn_cmod);
+         } else {
+            set(E::COND_MODIFIER, inst->cond_modifier);
+         }
+      }
+
+      switch (desc->format) {
+      case GEN_FORMAT_BASIC_ONE_SRC:
+      case GEN_FORMAT_BASIC_TWO_SRC: {
+         if (desc->has_dst) {
+            set(E::DST_ADDRESS_MODE, inst->dst.indirect);
+            set(E::DST_TYPE,         encode_type(inst->dst.file, inst->dst.type));
+            set(E::DST_HSTRIDE,      encode_hstride(inst->dst.region.hstride));
+
+            if (inst->dst.indirect)
+               encode_indirect_operand(E::DST_OPERAND, inst->dst);
+            else
+               encode_direct_operand(E::DST_OPERAND, inst->dst);
+
+            if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+               set(E::DST_OPERAND_EXTRA, inst->dst.indirect ? inst->dst.addr_imm & 1
+                                                            : inst->dst.subnr & 1);
+            }
+         }
+
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            set(E::ACC_WR_CONTROL, inst->acc_wr_control);
+
+         set(E::SRC0_ADDRESS_MODE, inst->src[0].indirect);
+         set(E::SRC0_NEGATE,       inst->src[0].negate);
+         set(E::SRC0_ABS,          inst->src[0].abs);
+         set(E::SRC0_TYPE,         encode_type(inst->src[0].file, inst->src[0].type));
+
+         int imm_src = -1;
+
+         if (inst->src[0].file == GEN_IMM) {
+            imm_src = 0;
+            set(E::SRC0_IS_IMM, 1);
+
+         } else {
+            if (inst->src[0].indirect)
+               encode_indirect_operand(E::SRC0_OPERAND, inst->src[0]);
+            else
+               encode_direct_operand(E::SRC0_OPERAND, inst->src[0]);
+
+            if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+               set(E::SRC0_OPERAND_EXTRA, inst->src[0].indirect ? inst->src[0].addr_imm & 1
+                                                                : inst->src[0].subnr & 1);
+            }
+
+            // TODO: Check the special cases for width=1/exec=1, should those
+            // be validated.  Maybe generator will handle those...
+
+            set(E::SRC0_VSTRIDE, encode_vstride(inst->src[0].region.vstride));
+            set(E::SRC0_HSTRIDE, encode_hstride(inst->src[0].region.hstride));
+            set(E::SRC0_WIDTH,   encode_width(inst->src[0].region.width));
+         }
+
+         if (desc->format == GEN_FORMAT_BASIC_TWO_SRC) {
+            set(E::SRC1_ADDRESS_MODE, inst->src[1].indirect);
+            set(E::SRC1_NEGATE,       inst->src[1].negate);
+            set(E::SRC1_ABS,          inst->src[1].abs);
+            set(E::SRC1_TYPE,         encode_type(inst->src[1].file, inst->src[1].type));
+
+            if (inst->src[1].file == GEN_IMM) {
+               assert(imm_src == -1);
+               imm_src = 1;
+               set(E::SRC1_IS_IMM, 1);
+
+            } else {
+               if (inst->src[1].indirect)
+                  encode_indirect_operand(E::SRC1_OPERAND, inst->src[1]);
+               else
+                  encode_direct_operand(E::SRC1_OPERAND, inst->src[1]);
+
+               set(E::SRC1_VSTRIDE, encode_vstride(inst->src[1].region.vstride));
+               set(E::SRC1_HSTRIDE, encode_hstride(inst->src[1].region.hstride));
+               set(E::SRC1_WIDTH,   encode_width(inst->src[1].region.width));
+            }
+         }
+
+         if (imm_src != -1) {
+            assert(inst->src[imm_src].file == GEN_IMM);
+
+            set(E::IMM_LO_32, inst->src[imm_src].imm & 0xFFFFFFFF);
+            if (brw_type_size_bytes(inst->src[imm_src].type) > 4)
+               set(E::IMM_HI_32, inst->src[imm_src].imm >> 32);
+         }
+
+         break;
+      }
+
+      case GEN_FORMAT_BASIC_THREE_SRC: {
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            set(E::ACC_WR_CONTROL,    inst->acc_wr_control);
+
+         set(E::THREE_EXEC_DATA_TYPE, brw_type_is_float_or_bfloat(inst->dst.type));
+         set(E::THREE_DST_TYPE,       encode_type_3src(inst->dst.type));
+         set(E::THREE_SRC0_TYPE,      encode_type_3src(inst->src[0].type));
+         set(E::THREE_SRC1_TYPE,      encode_type_3src(inst->src[1].type));
+         set(E::THREE_SRC2_TYPE,      encode_type_3src(inst->src[2].type));
+
+         // TODO: Improve hstride handling here and in decoder.
+         encode_direct_operand(E::THREE_DST_OPERAND, inst->dst);
+         set(E::THREE_DST_HSTRIDE,
+             inst->dst.region.hstride == 1 ? BRW_ALIGN1_3SRC_DST_HORIZONTAL_STRIDE_1
+                                           : BRW_ALIGN1_3SRC_DST_HORIZONTAL_STRIDE_2);
+
+         if (inst->src[0].file == GEN_IMM) {
+            set(E::SRC0_IS_IMM,    1);
+            set(E::THREE_SRC0_IMM, inst->src[0].imm & 0xFFFF);
+         } else {
+            encode_direct_operand(E::THREE_SRC0_OPERAND, inst->src[0]);
+
+            const unsigned src0_vstride = ENCODE_VSTRIDE_3SRC(inst->src[0].region.vstride);
+            set(E::THREE_SRC0_VSTRIDE_LO, (src0_vstride >> 0) & 1);
+            set(E::THREE_SRC0_VSTRIDE_HI, (src0_vstride >> 1) & 1);
+
+            set(E::THREE_SRC0_HSTRIDE, encode_hstride(inst->src[0].region.hstride));
+         }
+
+         encode_direct_operand(E::THREE_SRC1_OPERAND, inst->src[1]);
+
+         const unsigned src1_vstride = ENCODE_VSTRIDE_3SRC(inst->src[1].region.vstride);
+         set(E::THREE_SRC1_VSTRIDE_LO, (src1_vstride >> 0) & 1);
+         set(E::THREE_SRC1_VSTRIDE_HI, (src1_vstride >> 1) & 1);
+
+         set(E::THREE_SRC1_HSTRIDE, encode_hstride(inst->src[1].region.hstride));
+
+         if (inst->src[2].file == GEN_IMM) {
+            set(E::THREE_SRC2_IS_IMM, 1);
+            set(E::THREE_SRC2_IMM, inst->src[2].imm & 0xFFFF);
+         } else {
+            encode_direct_operand(E::THREE_SRC2_OPERAND, inst->src[2]);
+            set(E::THREE_SRC2_HSTRIDE, encode_hstride(inst->src[2].region.hstride));
+         }
+
+         if (inst->opcode != GEN_OP_BFN) {
+            set(E::SRC0_NEGATE,       inst->src[0].negate);
+            set(E::THREE_SRC1_NEGATE, inst->src[1].negate);
+            set(E::THREE_SRC2_NEGATE, inst->src[2].negate);
+            set(E::SRC0_ABS,          inst->src[0].abs);
+            set(E::THREE_SRC1_ABS,    inst->src[1].abs);
+            set(E::THREE_SRC2_ABS,    inst->src[2].abs);
+         } else {
+            set(E::BFN_FUNC_CONTROL_LO, (inst->boolean_func_ctrl >> 0) & 0xF);
+            set(E::BFN_FUNC_CONTROL_HI, (inst->boolean_func_ctrl >> 4) & 0xF);
+         }
+
+         break;
+      }
+
+      case GEN_FORMAT_DPAS_THREE_SRC: {
+         assert(devinfo->verx10 >= 125);
+
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            set(E::ACC_WR_CONTROL, inst->acc_wr_control);
+
+         set(E::DPAS_RCOUNT,    inst->dpas.rcount - 1);
+         set(E::DPAS_SDEPTH,    encode_sdepth(inst->dpas.sdepth));
+
+         set(E::THREE_EXEC_DATA_TYPE, brw_type_is_float_or_bfloat(inst->dst.type));
+         set(E::THREE_DST_TYPE,       encode_type_3src(inst->dst.type));
+         set(E::THREE_SRC0_TYPE,      encode_type_3src(inst->src[0].type));
+         set(E::THREE_SRC1_TYPE,      encode_type_3src(inst->src[1].type));
+         set(E::THREE_SRC2_TYPE,      encode_type_3src(inst->src[2].type));
+
+         set(E::DPAS_SRC1_SUBBYTE, inst->dpas.src1_subbyte);
+         set(E::DPAS_SRC2_SUBBYTE, inst->dpas.src2_subbyte);
+
+         /* TODO: Consider enabling the IsImm fields. */
+
+         encode_direct_operand(E::THREE_DST_OPERAND,  inst->dst);
+         encode_direct_operand(E::THREE_SRC0_OPERAND, inst->src[0]);
+         encode_direct_operand(E::THREE_SRC1_OPERAND, inst->src[1]);
+         encode_direct_operand(E::THREE_SRC2_OPERAND, inst->src[2]);
+
+         break;
+      }
+
+      case GEN_FORMAT_SEND: {
+         set(E::SEND_EOT,  inst->send.eot);
+         set(E::SEND_SFID, inst->send.sfid);
+
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            set(E::SEND_FUSION_CONTROL, inst->fusion_control);
+
+         const bool skip_subnr = true;
+         encode_direct_operand(E::DST_OPERAND,  inst->dst,    skip_subnr);
+         encode_direct_operand(E::SRC0_OPERAND, inst->src[0], skip_subnr);
+         encode_direct_operand(E::SRC1_OPERAND, inst->src[1], skip_subnr);
+
+         set(E::SEND_DESC_IS_REG,    inst->send.desc_is_reg);
+         set(E::SEND_EX_DESC_IS_REG, inst->send.ex_desc_is_reg);
+
+         bool gather = false;
+         if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+            gather = devinfo->ver >= 30 &&
+                     inst->src[0].file == GEN_ARF &&
+                     inst->src[0].nr == BRW_ARF_SCALAR;
+
+            if (gather) {
+               // TODO: Move check to validation.
+               assert((inst->src[0].subnr & 1) == 0);
+               set(E::SEND_SRC0_SUB_NR, inst->src[0].subnr >> 1);
+            }
+         }
+
+         bool xe2_ugm = false;
+         if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+            xe2_ugm = inst->send.sfid == BRW_SFID_UGM;
+
+         /* The SEND instruction ExBSO field does not exist with UGM on Gfx20+,
+          * it is assumed.  See Bspec 56890 (r70933).
+          */
+         if (inst->send.ex_bso && !xe2_ugm)
+            set(E::SEND_EX_BSO, 1);
+
+         if (!gather && ((inst->send.ex_desc_is_reg && inst->send.ex_bso) ||
+                          xe2_ugm))
+            set(E::SEND_SRC1_LEN, inst->send.src1_len);
+
+         if (!inst->send.desc_is_reg) {
+            set(bits(123, 122), GET_BITS(inst->send.desc_imm, 31, 30));
+            set(bits( 71,  67), GET_BITS(inst->send.desc_imm, 29, 25));
+            set(bits( 55,  51), GET_BITS(inst->send.desc_imm, 24, 20));
+            set(bits(121, 113), GET_BITS(inst->send.desc_imm, 19, 11));
+            set(bits( 91,  81), GET_BITS(inst->send.desc_imm, 10, 0));
+         }
+
+         if (!inst->send.ex_desc_is_reg) {
+            set(bits(127, 124), GET_BITS(inst->send.ex_desc_imm, 31, 28));
+            set(bits( 97,  96), GET_BITS(inst->send.ex_desc_imm, 27, 26));
+            set(bits( 65,  64), GET_BITS(inst->send.ex_desc_imm, 25, 24));
+            set(bits( 47,  35), GET_BITS(inst->send.ex_desc_imm, 23, 11));
+
+            assert(GET_BITS(inst->send.ex_desc_imm, 5, 0) == 0);
+
+            if (!gather)
+               set(bits(103,  99), GET_BITS(inst->send.ex_desc_imm, 10, 6));
+            else
+               assert(GET_BITS(inst->send.ex_desc_imm, 10, 6) == 0);
+
+         } else {
+            set(bits(42, 40), inst->send.ex_desc_subnr >> 2);
+
+            if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+               if (inst->send.ex_desc_imm_extra) {
+                  set(bits(127, 124), (inst->send.ex_desc_imm_extra >> 28) & 0xF);
+                  set(bits( 97,  96), (inst->send.ex_desc_imm_extra >> 26) & 0x3);
+                  set(bits( 65,  64), (inst->send.ex_desc_imm_extra >> 24) & 0x3);
+                  set(bits( 47,  43), (inst->send.ex_desc_imm_extra >> 19) & 0x1F);
+                  set(bits( 39,  36), (inst->send.ex_desc_imm_extra >> 12) & 0xF);
+               }
+            }
+         }
+
+         break;
+      }
+
+      case GEN_FORMAT_BRANCH: {
+         set(E::BRANCH_CONTROL, inst->branch_control);
+
+         set(E::SRC0_IS_IMM, 1);
+         set(E::IMM_LO_32, (uint32_t)inst->branch.jip);
+
+         if (gen_has_uip(inst->opcode)) {
+            set(E::SRC1_IS_IMM, 1);
+            set(E::IMM_HI_32, (uint32_t)inst->branch.uip);
+         }
+         break;
+      }
+
+      case GEN_FORMAT_ILLEGAL:
+      case GEN_FORMAT_NOP:
+         break;
+      }
+   }
+
+private:
+   inline void
+   set(const gen_range &bits, uint64_t value)
+   {
+      unsigned high = bits.hi;
+      unsigned low = bits.lo;
+
+      assume(high < 128);
+      assume(high >= low);
+      const unsigned word = high / 64;
+      assert(word == low / 64);
+
+      high %= 64;
+      low %= 64;
+
+      const uint64_t mask = (~0ull >> (64 - (high - low + 1))) << low;
+
+      /* Make sure the supplied value actually fits in the given bitfield. */
+      assert((value & (mask >> low)) == value);
+
+      raw->data[word] = (raw->data[word] & ~mask) | (value << low);
+   }
+
+   inline void
+   encode_direct_operand(const gen_range &bits, const gen_operand &o, bool skip_subnr = false)
+   {
+      unsigned subnr = o.subnr;
+      if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+         subnr >>= 1;
+
+      set(bits( 0), o.file == GEN_GRF ? 1 : 0);
+      if (!skip_subnr)
+         set(bits( 5, 1), subnr);
+      set(bits(13, 6), o.nr);
+   }
+
+   inline void
+   encode_indirect_operand(const gen_range &bits, const gen_operand &o)
+   {
+      unsigned raw_addr_imm;
+      if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+         raw_addr_imm = ((unsigned)o.addr_imm & ((1 << 11) - 1)) >> 1;
+      else
+         raw_addr_imm = (unsigned)o.addr_imm & ((1 << 10) - 1);
+
+      set(bits(13, 10), o.subnr);
+      set(bits( 9,  0), raw_addr_imm);
+   }
+
+   static inline unsigned
+   encode_vstride(unsigned value)
+   {
+      unsigned vstride =
+         value == BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL ? value : cvt(value);
+
+      if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+         vstride &= 0x7;
+
+      return vstride;
+   }
+
+   static inline unsigned
+   encode_hstride(unsigned value)
+   {
+      return cvt(value);
+   }
+
+   static inline unsigned
+   encode_width(unsigned value)
+   {
+      return cvt(value) - 1;
+   }
+
+   inline unsigned
+   encode_type(gen_file file, brw_reg_type type)
+   {
+      assert(file != GEN_IMM ||
+             brw_type_is_vector_imm(type) ||
+             brw_type_size_bits(type) >= 16);
+
+      if (type == BRW_TYPE_INVALID)
+         return INVALID_HW_REG_TYPE;
+
+      if (brw_type_size_bits(type) == 64 &&
+          !(brw_type_is_int(type) ? devinfo->has_64bit_int
+                                  : devinfo->has_64bit_float))
+         return INVALID_HW_REG_TYPE;
+
+      if (brw_type_is_bfloat(type) && !devinfo->has_bfloat16)
+         return INVALID_HW_REG_TYPE;
+
+      if (brw_type_is_vector_imm(type))
+         return type & ~(BRW_TYPE_VECTOR | BRW_TYPE_SIZE_MASK);
+
+      return type & (BRW_TYPE_BASE_MASK | BRW_TYPE_SIZE_MASK);
+   }
+
+   inline unsigned
+   encode_type_3src(brw_reg_type type)
+   {
+      if (brw_type_is_bfloat(type) && !devinfo->has_bfloat16)
+         return INVALID_HW_REG_TYPE;
+
+      /* size mask and SINT type bit match exactly */
+      return type & 0b111;
+   }
+
+   static inline unsigned
+   encode_file(gen_file file)
+   {
+      switch (file) {
+      case GEN_BAD_FILE: UNREACHABLE("invalid reg file");
+      case GEN_ARF:      return 0x0;
+      case GEN_GRF:      return 0x1;
+      case GEN_IMM:      return 0x3;
+      }
+   }
+};
+
+/* E is the struct with the Encoding fields and type. */
+template <typename E>
+struct gen_decoder {
+   const intel_device_info *devinfo;
+
+   gen_inst *inst;
+   const gen_raw_inst *raw;
+   char **error;
+   const gen_inst_description *desc;
+
+   // TODO: Store mem_ctx to build errors.
+   // TODO: keep count of the offset?
+
+   gen_decoder(const intel_device_info *devinfo)
+      : devinfo(devinfo)
+        {}
+
+   void
+   decode(gen_inst *inst, const gen_raw_inst *raw)
+   {
+      this->inst = inst;
+      this->raw = raw;
+      this->desc = &E::hw_to_description[get(E::HW_OPCODE)];
+
+      memset(inst, 0, sizeof(*inst));
+
+      const unsigned num_sources = gen_inst_num_sources(devinfo, inst);
+
+      inst->opcode = desc->gen_op;
+
+      inst->swsb = gen_swsb_decode(devinfo, gen_inst_is_unordered(devinfo, inst),
+                                   get(E::SWSB), inst->opcode);
+
+      const unsigned encoded_exec_size = get(E::EXEC_SIZE);
+      if (encoded_exec_size > 5)
+         RETURN_ERROR("invalid execution size");
+      inst->exec_size = 1 << encoded_exec_size;
+
+      if constexpr (E::TYPE == GEN_ENCODING_XE)
+         inst->chan_offset = get(E::CHAN_OFFSET) * 4;
+      else
+         inst->chan_offset = get(E::CHAN_OFFSET) * 8;
+
+      inst->flag_subnr     = get(E::FLAG_SUBNR);
+      inst->flag_nr        = get(E::FLAG_NR);
+      inst->pred_control   = (brw_predicate) get(E::PRED_CONTROL);
+      inst->pred_inv       = get(E::PRED_INV);
+      inst->debug_control  = get(E::DEBUG_CONTROL);
+      inst->no_mask        = get(E::NO_MASK);
+      inst->atomic_control = get(E::ATOMIC_CONTROL);
+
+      if (gen_inst_has_saturate(desc->format, inst))
+         inst->saturate = get(E::SATURATE);
+
+      if (gen_inst_has_cond_modifier(desc->format, inst)) {
+         if (inst->opcode == GEN_OP_BFN) {
+            const unsigned encoded_bfn_cmod = get(E::BFN_COND_MODIFIER);
+            inst->cond_modifier = encoded_bfn_cmod == 1 ? BRW_CONDITIONAL_Z :
+                                  encoded_bfn_cmod == 2 ? BRW_CONDITIONAL_G :
+                                  encoded_bfn_cmod == 3 ? BRW_CONDITIONAL_L :
+                                                          BRW_CONDITIONAL_NONE;
+         } else {
+            inst->cond_modifier = (brw_conditional_mod) get(E::COND_MODIFIER);
+         }
+      }
+
+      switch (desc->format) {
+      case GEN_FORMAT_BASIC_ONE_SRC:
+      case GEN_FORMAT_BASIC_TWO_SRC: {
+         if (desc->has_dst) {
+            inst->dst.indirect       = get(E::DST_ADDRESS_MODE);
+            inst->dst.region.hstride = decode_hstride(get(E::DST_HSTRIDE));
+
+            if (inst->dst.indirect) {
+               inst->dst.file = GEN_GRF;
+               decode_indirect_operand(E::DST_OPERAND, inst->dst);
+               if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+                  inst->dst.addr_imm |= get(E::DST_OPERAND_EXTRA);
+
+            } else {
+               decode_direct_operand(E::DST_OPERAND, inst->dst);
+               if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+                  inst->dst.subnr |= get(E::DST_OPERAND_EXTRA);
+            }
+         }
+
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            inst->acc_wr_control = get(E::ACC_WR_CONTROL);
+
+         inst->src[0].indirect     = get(E::SRC0_ADDRESS_MODE);
+         inst->src[0].negate       = get(E::SRC0_NEGATE);
+         inst->src[0].abs          = get(E::SRC0_ABS);
+
+         int imm_src = -1;
+         if (get(E::SRC0_IS_IMM)) {
+            imm_src = 0;
+            inst->src[0].file = GEN_IMM;
+
+         } else {
+            if (inst->src[0].indirect) {
+               decode_indirect_operand(E::SRC0_OPERAND, inst->src[0]);
+               inst->src[0].file = GEN_GRF;
+               if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+                  inst->src[0].addr_imm |= get(E::SRC0_OPERAND_EXTRA);
+
+            } else {
+               decode_direct_operand(E::SRC0_OPERAND, inst->src[0]);
+               if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+                  inst->src[0].subnr |= get(E::SRC0_OPERAND_EXTRA);
+            }
+
+            inst->src[0].region.vstride = decode_vstride(get(E::SRC0_VSTRIDE));
+            inst->src[0].region.width   = decode_width(get(E::SRC0_WIDTH));
+            inst->src[0].region.hstride = decode_hstride(get(E::SRC0_HSTRIDE));
+         }
+
+         if (desc->format == GEN_FORMAT_BASIC_TWO_SRC) {
+            inst->src[1].indirect = get(E::SRC1_ADDRESS_MODE);
+            inst->src[1].negate   = get(E::SRC1_NEGATE);
+            inst->src[1].abs      = get(E::SRC1_ABS);
+
+            if (get(E::SRC1_IS_IMM)) {
+               assert(imm_src == - 1);
+               imm_src = 1;
+               inst->src[1].file = GEN_IMM;
+
+            } else {
+               if (inst->src[1].indirect)
+                  decode_indirect_operand(E::SRC1_OPERAND, inst->src[1]);
+               else
+                  decode_direct_operand(E::SRC1_OPERAND, inst->src[1]);
+
+               inst->src[1].region.vstride = decode_vstride(get(E::SRC1_VSTRIDE));
+               inst->src[1].region.width   = decode_width(get(E::SRC1_WIDTH));
+               inst->src[1].region.hstride = decode_hstride(get(E::SRC1_HSTRIDE));
+            }
+         }
+
+         inst->dst.type    = decode_type(inst->dst.file,    get(E::DST_TYPE));
+         inst->src[0].type = decode_type(inst->src[0].file, get(E::SRC0_TYPE));
+         inst->src[1].type = decode_type(inst->src[1].file, get(E::SRC1_TYPE));
+
+         if (imm_src != -1) {
+            uint64_t value = get(E::IMM_LO_32);
+            if (brw_type_size_bytes(inst->src[imm_src].type) > 4)
+               value |= get(E::IMM_HI_32) << 32;
+            inst->src[imm_src].imm = value;
+         }
+
+         break;
+      }
+
+      case GEN_FORMAT_BASIC_THREE_SRC: {
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            inst->acc_wr_control = get(E::ACC_WR_CONTROL);
+
+         const unsigned exec_type = get(E::THREE_EXEC_DATA_TYPE);
+         inst->dst.type    = decode_type_3src(get(E::THREE_DST_TYPE), exec_type);
+         inst->src[0].type = decode_type_3src(get(E::THREE_SRC0_TYPE), exec_type);
+         inst->src[1].type = decode_type_3src(get(E::THREE_SRC1_TYPE), exec_type);
+         inst->src[2].type = decode_type_3src(get(E::THREE_SRC2_TYPE), exec_type);
+
+         // TODO: Improve hstride handling here and in encoder.
+         decode_direct_operand(E::THREE_DST_OPERAND, inst->dst);
+         inst->dst.region.hstride = get(E::THREE_DST_HSTRIDE) + 1;
+
+         const bool src0_is_imm = get(E::SRC0_IS_IMM);
+         const bool src2_is_imm = get(E::THREE_SRC2_IS_IMM);
+
+         if (src0_is_imm) {
+            inst->src[0].file = GEN_IMM;
+            inst->src[0].imm = get(E::THREE_SRC0_IMM);
+         } else {
+            decode_direct_operand(E::THREE_SRC0_OPERAND, inst->src[0]);
+
+            const unsigned encoded_src0_vstride =
+               (get(E::THREE_SRC0_VSTRIDE_LO) << 0)|
+               (get(E::THREE_SRC0_VSTRIDE_HI) << 1);
+            inst->src[0].region.vstride = DECODE_VSTRIDE_3SRC(encoded_src0_vstride);
+
+            inst->src[0].region.hstride = decode_hstride(get(E::THREE_SRC0_HSTRIDE));
+            inst->src[0].region.width = brw_implied_width_for_3src_a1(inst->src[0].region.vstride, inst->src[0].region.hstride);
+         }
+
+         decode_direct_operand(E::THREE_SRC1_OPERAND, inst->src[1]);
+
+         const unsigned encoded_src1_vstride =
+            (get(E::THREE_SRC1_VSTRIDE_LO) << 0)|
+            (get(E::THREE_SRC1_VSTRIDE_HI) << 1);
+         inst->src[1].region.vstride = DECODE_VSTRIDE_3SRC(encoded_src1_vstride);
+
+         inst->src[1].region.hstride = decode_hstride(get(E::THREE_SRC1_HSTRIDE));
+         inst->src[1].region.width = brw_implied_width_for_3src_a1(inst->src[1].region.vstride, inst->src[0].region.hstride);
+
+         if (src2_is_imm) {
+            inst->src[2].file = GEN_IMM;
+            inst->src[2].imm = get(E::THREE_SRC2_IMM);
+         } else {
+            decode_direct_operand(E::THREE_SRC2_OPERAND, inst->src[2]);
+
+            inst->src[2].region.hstride = decode_hstride(get(E::THREE_SRC2_HSTRIDE));
+            inst->src[2].region.width = brw_implied_width_for_3src_a1(inst->src[2].region.vstride, inst->src[2].region.hstride);
+         }
+
+         if (inst->opcode != GEN_OP_BFN) {
+            inst->src[0].negate = get(E::SRC0_NEGATE);
+            inst->src[1].negate = get(E::THREE_SRC1_NEGATE);
+            inst->src[2].negate = get(E::THREE_SRC2_NEGATE);
+            inst->src[0].abs    = get(E::SRC0_ABS);
+            inst->src[1].abs    = get(E::THREE_SRC1_ABS);
+            inst->src[2].abs    = get(E::THREE_SRC2_ABS);
+         } else {
+            inst->boolean_func_ctrl = (get(E::BFN_FUNC_CONTROL_LO) << 0) |
+                                      (get(E::BFN_FUNC_CONTROL_HI) << 4);
+         }
+
+         break;
+      }
+
+      case GEN_FORMAT_DPAS_THREE_SRC: {
+         assert(devinfo->verx10 >= 125);
+
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            inst->acc_wr_control = get(E::ACC_WR_CONTROL);
+
+         inst->dpas.rcount    = get(E::DPAS_RCOUNT) + 1;
+         inst->dpas.sdepth    = decode_sdepth(get(E::DPAS_SDEPTH));
+
+         const unsigned exec_type = get(E::THREE_EXEC_DATA_TYPE);
+         inst->dst.type    = decode_type_3src(get(E::THREE_DST_TYPE), exec_type);
+         inst->src[0].type = decode_type_3src(get(E::THREE_SRC0_TYPE), exec_type);
+         inst->src[1].type = decode_type_3src(get(E::THREE_SRC1_TYPE), exec_type);
+         inst->src[2].type = decode_type_3src(get(E::THREE_SRC2_TYPE), exec_type);
+
+         inst->dpas.src1_subbyte = get(E::DPAS_SRC1_SUBBYTE);
+         inst->dpas.src2_subbyte = get(E::DPAS_SRC2_SUBBYTE);
+
+         /* TODO: Consider enabling the IsImm fields. */
+
+         decode_direct_operand(E::THREE_DST_OPERAND,  inst->dst);
+         decode_direct_operand(E::THREE_SRC0_OPERAND, inst->src[0]);
+         decode_direct_operand(E::THREE_SRC1_OPERAND, inst->src[1]);
+         decode_direct_operand(E::THREE_SRC2_OPERAND, inst->src[2]);
+
+         break;
+      }
+
+      case GEN_FORMAT_SEND: {
+         inst->send.eot  = get(E::SEND_EOT);
+         inst->send.sfid = get(E::SEND_SFID);
+
+         if constexpr (E::TYPE == GEN_ENCODING_XE)
+            inst->fusion_control = get(E::SEND_FUSION_CONTROL);
+
+         const bool skip_subnr = true;
+         decode_direct_operand(E::DST_OPERAND,  inst->dst,    skip_subnr);
+         decode_direct_operand(E::SRC0_OPERAND, inst->src[0], skip_subnr);
+         decode_direct_operand(E::SRC1_OPERAND, inst->src[1], skip_subnr);
+
+         inst->send.desc_is_reg    = get(E::SEND_DESC_IS_REG);
+         inst->send.ex_desc_is_reg = get(E::SEND_EX_DESC_IS_REG);
+
+         inst->dst.type    = BRW_TYPE_D;
+         inst->src[0].type = BRW_TYPE_D;
+         inst->src[1].type = BRW_TYPE_D;
+
+         gen_range bits = { 127, 0 };
+
+         if (!inst->send.desc_is_reg) {
+            inst->send.desc_imm = get(bits(123, 122)) << 30 |
+                                  get(bits( 71,  67)) << 25 |
+                                  get(bits( 55,  51)) << 20 |
+                                  get(bits(121, 113)) << 11 |
+                                  get(bits( 91,  81));
+         }
+
+         bool gather = false;
+         if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+            gather = devinfo->ver >= 30 &&
+                     inst->src[0].file == GEN_ARF &&
+                     inst->src[0].nr == BRW_ARF_SCALAR;
+
+            if (gather)
+               inst->src[0].subnr = get(E::SEND_SRC0_SUB_NR) << 1;
+         }
+
+         if (devinfo->verx10 >= 125) {
+            /* The send instruction ExBSO field does not exist with UGM on Gfx20+,
+             * it is assumed.  See Bspec 56890 (r70933).
+             */
+            bool xe2_ugm = false;
+            if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+               xe2_ugm = inst->send.sfid == BRW_SFID_UGM;
+
+            inst->send.ex_bso = xe2_ugm || get(E::SEND_EX_BSO);
+
+            if (!gather && ((inst->send.ex_desc_is_reg && inst->send.ex_bso) ||
+                            xe2_ugm))
+               inst->send.src1_len = get(E::SEND_SRC1_LEN);
+         }
+
+         if (!inst->send.ex_desc_is_reg) {
+            inst->send.ex_desc_imm = get(bits(127, 124)) << 28 |
+                                     get(bits( 97,  96)) << 26 |
+                                     get(bits( 65,  64)) << 24 |
+                                     get(bits( 47,  35)) << 11;
+
+            if (!gather)
+               inst->send.ex_desc_imm |= get(bits(103, 99)) << 6;
+
+          } else {
+            inst->send.ex_desc_subnr = get(bits(42, 40)) << 2;
+
+            if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+               inst->send.ex_desc_imm_extra =
+                  get(bits(127, 124)) << 28 |
+                  get(bits( 97,  96)) << 26 |
+                  get(bits( 65,  64)) << 24 |
+                  get(bits( 47,  43)) << 19 |
+                  get(bits( 39,  36)) << 12;
+            }
+         }
+
+         break;
+      }
+
+      case GEN_FORMAT_BRANCH: {
+         inst->branch_control = get(E::BRANCH_CONTROL);
+         inst->branch.jip = (int32_t) get(E::IMM_LO_32);
+         if (gen_has_uip(inst->opcode))
+            inst->branch.uip = (int32_t) get(E::IMM_HI_32);
+         // TODO: Check mask control.
+         break;
+      }
+
+      case GEN_FORMAT_ILLEGAL:
+      case GEN_FORMAT_NOP:
+         break;
+      }
+
+      if (desc->has_dst) {
+         ERROR_IF(inst->dst.type == BRW_TYPE_INVALID,
+               "Invalid destination register type encoding.");
+      }
+
+      for (unsigned i = 0; i < num_sources; i++) {
+         ERROR_IF(inst->src[i].type == BRW_TYPE_INVALID,
+               "Invalid source register type encoding.");
+      }
+   }
+
+private:
+   inline uint64_t
+   get(const gen_range &bits) const
+   {
+      unsigned high = bits.hi;
+      unsigned low = bits.lo;
+
+      assume(high < 128);
+      assume(high >= low);
+      /* We assume the field doesn't cross 64-bit boundaries. */
+      const unsigned word = high / 64;
+      assert(word == low / 64);
+
+      high %= 64;
+      low %= 64;
+
+      const uint64_t mask = (~0ull >> (64 - (high - low + 1)));
+
+      return (raw->data[word] >> low) & mask;
+   }
+
+   inline void
+   decode_direct_operand(const gen_range &bits, gen_operand &o, bool skip_subnr = false)
+   {
+      o.file  = get(bits( 0)) ? GEN_GRF : GEN_ARF;
+      o.nr    = get(bits(13, 6));
+
+      if (!skip_subnr) {
+         o.subnr = get(bits( 5, 1));
+         if constexpr (E::TYPE >= GEN_ENCODING_XE2)
+            o.subnr <<= 1;
+      }
+   }
+
+   inline void
+   decode_indirect_operand(const gen_range &bits, gen_operand &o)
+   {
+      unsigned shift = 22;
+      uint64_t addr_imm_bits = get(bits(9, 0));
+
+      if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+         shift--;
+         addr_imm_bits = addr_imm_bits << 1;
+      }
+
+      o.addr_imm = static_cast<int32_t>(addr_imm_bits << shift) >> shift;
+      o.subnr    = get(bits(13, 10));
+
+   }
+
+   static inline unsigned
+   decode_vstride(unsigned v)
+   {
+      if constexpr (E::TYPE >= GEN_ENCODING_XE2) {
+         if (v == 0x7)
+            return BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL;
+      }
+      if (v == BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL)
+         return BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL;
+      return v ? 1 << (v - 1) : 0;
+   }
+
+   static inline unsigned
+   decode_hstride(unsigned v)
+   {
+      return v ? 1 << (v - 1) : 0;
+   }
+
+   static inline unsigned
+   decode_width(unsigned v)
+   {
+      return 1 << v;
+   }
+
+   static inline gen_file
+   decode_file(unsigned hw_file)
+   {
+      switch (hw_file) {
+      case 0:  return GEN_ARF;
+      case 1:  return GEN_GRF;
+      default: return GEN_IMM;
+      }
+   }
+
+   inline brw_reg_type
+   decode_type(gen_file file, unsigned hw_type)
+   {
+      if (hw_type >= (1 << 4))
+         return BRW_TYPE_INVALID;
+
+      enum brw_reg_type t = (enum brw_reg_type) hw_type;
+      if (brw_type_size_bits(t) == 8) {
+         if (brw_type_is_float(t))
+            return file == GEN_IMM ? BRW_TYPE_VF : BRW_TYPE_INVALID;
+         else if (file == GEN_IMM)
+            return (t & BRW_TYPE_BASE_SINT) ? BRW_TYPE_V : BRW_TYPE_UV;
+      }
+      if (brw_type_is_bfloat(t) && !devinfo->has_bfloat16)
+         return BRW_TYPE_INVALID;
+      if (brw_type_is_float_or_bfloat(t) && brw_type_size_bits(t) < 16)
+         return BRW_TYPE_INVALID;
+      return t;
+   }
+
+   inline brw_reg_type
+   decode_type_3src(unsigned hw_type, unsigned exec_type)
+   {
+      STATIC_ASSERT(BRW_ALIGN1_3SRC_EXEC_TYPE_INT == 0);
+      STATIC_ASSERT(BRW_ALIGN1_3SRC_EXEC_TYPE_FLOAT == 1);
+      assert(exec_type == 0 || exec_type == 1);
+
+      unsigned size_field = hw_type & BRW_TYPE_SIZE_MASK;
+      unsigned base_field = hw_type & BRW_TYPE_BASE_MASK;
+      if (exec_type == BRW_ALIGN1_3SRC_EXEC_TYPE_FLOAT) {
+         base_field |= BRW_TYPE_BASE_FLOAT;
+         if (base_field == BRW_TYPE_BASE_BFLOAT && !devinfo->has_bfloat16)
+            return BRW_TYPE_INVALID;
+      }
+      return (enum brw_reg_type) (base_field | size_field);
+   }
+};
+
+// TODO: Decode should also just go ahed and run validation!!
+
+bool
+gen_encode(gen_encode_params *params)
+{
+   assert(params->devinfo);
+   assert(params->mem_ctx);
+   assert(params->insts);
+   assert(params->errors == NULL);
+
+   const intel_device_info *devinfo = params->devinfo;
+
+   if (params->num_insts == 0)
+      return true;
+
+   /* Early return if is not valid. */
+   {
+      gen_validate_params val_params = {
+         .devinfo   = devinfo,
+         .mem_ctx   = params->mem_ctx,
+         .insts     = params->insts,
+         .num_insts = params->num_insts,
+      };
+
+      if (!gen_validate(&val_params)) {
+         params->errors     = val_params.errors;
+         params->num_errors = val_params.num_errors;
+         return false;
+      }
+   }
+
+   const int required_size = params->num_insts * sizeof(gen_raw_inst);
+
+   if (params->raw_bytes != NULL) {
+      if (params->raw_bytes_size < required_size)
+         return false;
+
+   } else {
+      /* Need to ralloc a new buffer. */
+      params->raw_bytes = ralloc_array(params->mem_ctx, gen_raw_inst, params->num_insts);
+      params->raw_bytes_size = required_size;
+   }
+
+   if (devinfo->ver < 12)
+      return gen_encode_pre_xe(params);
+
+   gen_raw_inst *raw = (gen_raw_inst *)params->raw_bytes;
+   int written = 0;
+
+   if (devinfo->ver < 20) {
+      auto e = gen_encoder<gen_encoding_xe>(devinfo);
+
+      for (int i = 0; i < params->num_insts; i++) {
+         // TODO: Handle encode failure.
+         e.encode(params->insts[i], raw + i);
+         written++;
+      }
+
+   } else {
+      auto e = gen_encoder<gen_encoding_xe2>(devinfo);
+
+      for (int i = 0; i < params->num_insts; i++) {
+         // TODO: Handle encode failure.
+         e.encode(params->insts[i], raw + i);
+         written++;
+      }
+   }
+
+   params->raw_bytes_size = written * sizeof(gen_raw_inst);
+   return params->errors == NULL;
+}
+
+static int
+gen_count_instructions(const void *raw_bytes, int raw_bytes_size)
+{
+   uint64_t *raw = (uint64_t *)raw_bytes;
+   const uint64_t *raw_end = raw + (raw_bytes_size / 8);
+
+   int count = 0;
+
+   while (raw < raw_end) {
+      /* Decide if we walk 64-bit or 128-bit based whether encoded
+       * instruction is compacted.
+       */
+      raw += gen_raw_is_compact(raw) ? 1 : 2;
+      count++;
+   }
+
+   return count;
+}
+
+bool
+gen_decode(gen_decode_params *params)
+{
+   assert(params->devinfo);
+   assert(params->mem_ctx);
+   assert(params->raw_bytes);
+   assert(params->insts == NULL);
+   assert(params->errors == NULL);
+
+   // TODO: Check if we could be stricter and use 16, i.e.
+   // if padding at end is always required.
+   assert(params->raw_bytes_size % 8 == 0);
+
+   const intel_device_info *devinfo = params->devinfo;
+
+   // TODO: Should we make an error here?
+   if (params->raw_bytes_size == 0)
+      return true;
+
+   params->num_insts = gen_count_instructions(params->raw_bytes, params->raw_bytes_size);
+   assert(params->num_insts > 0);
+
+   params->insts = ralloc_array(params->mem_ctx, gen_inst *, params->num_insts);
+
+   /* Fill the array of pointers with new values to be used by the decoder. */
+   gen_inst *insts_values = rzalloc_array(params->mem_ctx, gen_inst, params->num_insts);
+   for (int i = 0; i < params->num_insts; i++)
+      params->insts[i] = &insts_values[i];
+
+   if (devinfo->ver < 12)
+      return gen_decode_pre_xe(params);
+
+   // TODO: Make a function inside decoder so we don't duplicate this.
+
+   int decoded = 0;
+
+   uint64_t *raw = (uint64_t *)params->raw_bytes;
+   const uint64_t *raw_end = raw + (params->raw_bytes_size / 8);
+
+   if (devinfo->ver < 20) {
+      auto d = gen_decoder<gen_encoding_xe>(devinfo);
+
+      while (raw < raw_end) {
+         // TODO: Compact.  Maybe teach decode to mark whether "was compact"?
+         // Or just do it from here and add a bitset was compact to the
+         // params.
+         assert(gen_raw_is_compact((void *)raw) == false);
+
+         // TODO: Error handling.
+         d.decode(params->insts[decoded], (gen_raw_inst *)raw);
+         decoded++;
+
+         raw += 2;
+      }
+
+   } else {
+      auto d = gen_decoder<gen_encoding_xe2>(devinfo);
+
+      while (raw < raw_end) {
+         // TODO: Compact.  Maybe teach decode to mark whether "was compact"?
+         // Or just do it from here and add a bitset was compact to the
+         // params.
+         assert(gen_raw_is_compact((void *)raw) == false);
+
+         // TODO: Error handling.
+         d.decode(params->insts[decoded], (gen_raw_inst *)raw);
+         decoded++;
+
+         raw += 2;
+      }
+   }
+
+   params->num_insts = decoded;
+   return params->errors == NULL;
+}
