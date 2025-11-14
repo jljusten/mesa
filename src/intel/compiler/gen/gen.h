@@ -19,6 +19,23 @@
 extern "C" {
 #endif
 
+/* Finish structured control flow instructions JIPs and UIPs by
+ * converting them from absolute indices in the array into relative
+ * byte offsets.
+ *
+ * The caller must ensure that JIP for WHILE instructions is a
+ * valid index.  It represents the "back-edge" and can't be inferred
+ * since there's no DO instruction marking the start of a loop.
+ *
+ * Any other JIPs and UIPs set to zero will be inferred by the structure
+ * of the program.
+ *
+ * If a final_halt_idx is provided, that will act as a final synchronization
+ * point for the halts and JIPs filled in the instructions.
+ */
+bool gen_finish_structured_cf(gen_inst **insts, int num_insts, int final_halt_idx);
+
+
 typedef struct gen_encode_params {
    const struct intel_device_info *devinfo;
 
