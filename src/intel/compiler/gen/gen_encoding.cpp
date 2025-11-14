@@ -58,14 +58,14 @@ gen_implied_width_for_3src_a1(unsigned v, unsigned h)
 #define ERROR_IF(cond, msg)                             \
    do {                                                 \
       if ((cond))                                       \
-         report_error(msg);                              \
+         report_errorf("%s", msg);                       \
    } while(0)
 
 #define RETURN_ERROR(msg) RETURN_ERROR_IF(true, msg)
 #define RETURN_ERROR_IF(cond, msg)                      \
    do {                                                 \
       if ((cond)) {                                     \
-         report_error(msg);                              \
+         report_errorf("%s", msg);                       \
          return;                                        \
       }                                                 \
    } while(0)
@@ -1194,12 +1194,17 @@ struct gen_decoder {
         error_index(0)
         {}
 
-   void
-   report_error(const char *msg)
+   void PRINTFLIKE(2, 3)
+   report_errorf(const char *fmt, ...)
    {
       errors = reralloc(mem_ctx, errors, gen_error, num_errors + 1);
       errors[num_errors].index = error_index;
-      errors[num_errors].msg = ralloc_asprintf(mem_ctx, "%s", msg);
+
+      va_list args;
+      va_start(args, fmt);
+      errors[num_errors].msg = ralloc_vasprintf(mem_ctx, fmt, args);
+      va_end(args);
+
       num_errors++;
    }
 
@@ -1813,6 +1818,22 @@ gen_encode(gen_encode_params *params)
    if (params->num_insts == 0) {
       params->raw_bytes_size = 0;
       return true;
+   }
+
+   if (!params->skip_validation) {
+      gen_validate_params val_params = {
+         .devinfo   = devinfo,
+         .insts     = params->insts,
+         .num_insts = params->num_insts,
+         .mem_ctx   = params->mem_ctx,
+      };
+
+      /* Early return if is not valid. */
+      if (!gen_validate(&val_params)) {
+         params->errors     = val_params.errors;
+         params->num_errors = val_params.num_errors;
+         return false;
+      }
    }
 
    const int required_size = params->num_insts * sizeof(gen_raw_inst);

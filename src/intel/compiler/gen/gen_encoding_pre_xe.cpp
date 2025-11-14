@@ -1069,12 +1069,17 @@ struct gen_decoder_pre_xe {
         error_index(0)
    {}
 
-   void
-   report_error(const char *msg)
+   void PRINTFLIKE(2, 3)
+   report_errorf(const char *fmt, ...)
    {
       errors = reralloc(mem_ctx, errors, gen_error, num_errors + 1);
       errors[num_errors].index = error_index;
-      errors[num_errors].msg = ralloc_asprintf(mem_ctx, "%s", msg);
+
+      va_list args;
+      va_start(args, fmt);
+      errors[num_errors].msg = ralloc_vasprintf(mem_ctx, fmt, args);
+      va_end(args);
+
       num_errors++;
    }
 
