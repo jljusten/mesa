@@ -36,6 +36,8 @@ libintel_compiler_brw_files = files(
   'brw_from_nir.cpp',
   'brw_generator.cpp',
   'brw_generator.h',
+  'brw_generator_gen.cpp',
+  'brw_generator_gen.h',
   'brw_inst.cpp',
   'brw_inst.h',
   'brw_isa_info.h',
@@ -138,7 +140,7 @@ libintel_compiler_brw = static_library(
   cpp_args : ['-Werror=vla'],
   gnu_symbol_visibility : 'hidden',
   link_with : libintel_compiler_nir,
-  dependencies : [idep_nir_headers, idep_mesautil, idep_intel_dev, idep_genxml, idep_vtn, idep_mda],
+  dependencies : [idep_nir_headers, idep_mesautil, idep_intel_dev, idep_genxml, idep_vtn, idep_mda, idep_intel_compiler_gen],
   build_by_default : false,
 )
 
