@@ -109,6 +109,48 @@ typedef struct gen_validate_params {
 bool gen_validate(gen_validate_params *params);
 
 
+typedef enum gen_print_flags {
+   GEN_PRINT_NONE = 0,
+
+   /* Don't omit regions, types and other values that can be inferred. */
+   GEN_PRINT_VERBOSE = 1 << 0,
+
+   /* Print SENDs instead of translated operations like LOAD and STORE. */
+   GEN_PRINT_RAW_SENDS = 1 << 1,
+} gen_print_flags;
+
+typedef struct gen_print_params {
+   const struct intel_device_info *devinfo;
+
+   /* When NULL, uses stderr. */
+   FILE *fp;
+
+   gen_print_flags flags;
+
+   gen_inst **insts;
+   int        num_insts;
+
+   /* Optional errors to print inline. */
+   const gen_error *errors;
+   int              num_errors;
+
+   /* Optional per-instruction information.  When non-NULL, these
+    * arrays must have `num_insts` elements.
+    */
+   const char *const *annotations;
+   const bool        *was_compacted;
+} gen_print_params;
+
+void gen_print(gen_print_params *params);
+
+void gen_print_inst(const struct intel_device_info *devinfo,
+                    FILE *fp,
+                    const gen_inst *inst,
+                    gen_print_flags flags);
+
+const char *gen_opcode_to_string(gen_opcode op);
+
+
 gen_lsc_desc gen_lsc_desc_decode(const struct intel_device_info *devinfo,
                                  uint32_t desc);
 
