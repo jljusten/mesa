@@ -36,6 +36,8 @@ libintel_compiler_brw_files = files(
   'brw_from_nir.cpp',
   'brw_generator.cpp',
   'brw_generator.h',
+  'brw_generator_gen.cpp',
+  'brw_generator_gen.h',
   'brw_inst.cpp',
   'brw_inst.h',
   'brw_isa_info.h',
