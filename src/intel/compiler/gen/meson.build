@@ -11,6 +11,7 @@ libintel_compiler_gen_files = files(
   'gen_private.h',
 
   'gen_control_flow.cpp',
+  'gen_parse.cpp',
   'gen_print.cpp',
   'gen_encoding.cpp',
   'gen_encoding_pre_xe.cpp',
@@ -53,6 +54,8 @@ if with_tests
       files(
         'gen_control_flow_test.cpp',
         'gen_encoding_test.cpp',
+        'gen_parse_test.cpp',
+        'gen_parse_print_test.cpp',
         'gen_print_test.cpp',
         'gen_validate_test.cpp',
       ),
