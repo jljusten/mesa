@@ -2148,16 +2148,19 @@ brw_disassemble_inst(FILE *file, const struct brw_isa_info *isa,
       pad(file, 16);
       string(file, "JIP: ");
       write_label(file, devinfo, root_label, offset, brw_eu_inst_jip(devinfo, inst));
+      format(file, "(0x%x)", brw_eu_inst_jip(devinfo, inst));
 
       pad(file, 38);
       string(file, "UIP: ");
       write_label(file, devinfo, root_label, offset, brw_eu_inst_uip(devinfo, inst));
+      format(file, "(0x%x)", brw_eu_inst_uip(devinfo, inst));
    } else if (brw_has_jip(devinfo, opcode)) {
       int jip = brw_eu_inst_jip(devinfo, inst);
 
       pad(file, 16);
       string(file, "JIP: ");
       write_label(file, devinfo, root_label, offset, jip);
+      format(file, "(0x%x)", brw_eu_inst_jip(devinfo, inst));
    } else if (opcode == BRW_OPCODE_JMPI) {
       pad(file, 16);
       err |= src1(file, isa, inst);
