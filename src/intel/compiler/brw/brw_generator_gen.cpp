@@ -4,41 +4,198 @@
  */
 
 #include <algorithm>
+#include <optional>
 #include <vector>
 
+#include "brw_disasm.h"
 #include "brw_eu.h"
 #include "brw_disasm_info.h"
 #include "brw_shader.h"
 #include "brw_generator_gen.h"
 #include "brw_cfg.h"
 #include "dev/intel_debug.h"
+#include "util/ralloc.h"
 #include "util/mesa-blake3.h"
 #include "util/half_float.h"
 
-static uint32_t
-brw_math_function(enum opcode op)
+gen_opcode
+brw_generator_gen::to_gen(enum opcode op)
 {
    switch (op) {
-   case SHADER_OPCODE_RCP:
-      return BRW_MATH_FUNCTION_INV;
-   case SHADER_OPCODE_RSQ:
-      return BRW_MATH_FUNCTION_RSQ;
-   case SHADER_OPCODE_SQRT:
-      return BRW_MATH_FUNCTION_SQRT;
-   case SHADER_OPCODE_EXP2:
-      return BRW_MATH_FUNCTION_EXP;
-   case SHADER_OPCODE_LOG2:
-      return BRW_MATH_FUNCTION_LOG;
-   case SHADER_OPCODE_POW:
-      return BRW_MATH_FUNCTION_POW;
-   case SHADER_OPCODE_SIN:
-      return BRW_MATH_FUNCTION_SIN;
-   case SHADER_OPCODE_COS:
-      return BRW_MATH_FUNCTION_COS;
-   case SHADER_OPCODE_INT_QUOTIENT:
-      return BRW_MATH_FUNCTION_INT_DIV_QUOTIENT;
-   case SHADER_OPCODE_INT_REMAINDER:
-      return BRW_MATH_FUNCTION_INT_DIV_REMAINDER;
+   case BRW_OPCODE_ILLEGAL:  return GEN_OP_ILLEGAL;
+
+   case BRW_OPCODE_ADD:      return GEN_OP_ADD;
+   case BRW_OPCODE_ADD3:     return GEN_OP_ADD3;
+   case BRW_OPCODE_ADDC:     return GEN_OP_ADDC;
+   case BRW_OPCODE_AND:      return GEN_OP_AND;
+   case BRW_OPCODE_ASR:      return GEN_OP_ASR;
+   case BRW_OPCODE_AVG:      return GEN_OP_AVG;
+   case BRW_OPCODE_BFE:      return GEN_OP_BFE;
+   case BRW_OPCODE_BFI1:     return GEN_OP_BFI1;
+   case BRW_OPCODE_BFI2:     return GEN_OP_BFI2;
+   case BRW_OPCODE_BFN:      return GEN_OP_BFN;
+   case BRW_OPCODE_BFREV:    return GEN_OP_BFREV;
+   case BRW_OPCODE_BRC:      return GEN_OP_BRC;
+   case BRW_OPCODE_BRD:      return GEN_OP_BRD;
+   case BRW_OPCODE_BREAK:    return GEN_OP_BREAK;
+   case BRW_OPCODE_CALL:     return GEN_OP_CALL;
+   case BRW_OPCODE_CALLA:    return GEN_OP_CALLA;
+   case BRW_OPCODE_CBIT:     return GEN_OP_CBIT;
+   case BRW_OPCODE_CMP:      return GEN_OP_CMP;
+   case BRW_OPCODE_CMPN:     return GEN_OP_CMPN;
+   case BRW_OPCODE_CONTINUE: return GEN_OP_CONTINUE;
+   case BRW_OPCODE_CSEL:     return GEN_OP_CSEL;
+   case BRW_OPCODE_DP2:      return GEN_OP_DP2;
+   case BRW_OPCODE_DP3:      return GEN_OP_DP3;
+   case BRW_OPCODE_DP4:      return GEN_OP_DP4;
+   case BRW_OPCODE_DP4A:     return GEN_OP_DP4A;
+   case BRW_OPCODE_DPAS:     return GEN_OP_DPAS;
+   case BRW_OPCODE_DPH:      return GEN_OP_DPH;
+   case BRW_OPCODE_ELSE:     return GEN_OP_ELSE;
+   case BRW_OPCODE_ENDIF:    return GEN_OP_ENDIF;
+   case BRW_OPCODE_FBH:      return GEN_OP_FBH;
+   case BRW_OPCODE_FBL:      return GEN_OP_FBL;
+   case BRW_OPCODE_FRC:      return GEN_OP_FRC;
+   case BRW_OPCODE_GOTO:     return GEN_OP_GOTO;
+   case BRW_OPCODE_HALT:     return GEN_OP_HALT;
+   case BRW_OPCODE_IF:       return GEN_OP_IF;
+   case BRW_OPCODE_JMPI:     return GEN_OP_JMPI;
+   case BRW_OPCODE_JOIN:     return GEN_OP_JOIN;
+   case BRW_OPCODE_LINE:     return GEN_OP_LINE;
+   case BRW_OPCODE_LRP:      return GEN_OP_LRP;
+   case BRW_OPCODE_LZD:      return GEN_OP_LZD;
+   case BRW_OPCODE_MAC:      return GEN_OP_MAC;
+   case BRW_OPCODE_MACH:     return GEN_OP_MACH;
+   case BRW_OPCODE_MAD:      return GEN_OP_MAD;
+   case BRW_OPCODE_MADM:     return GEN_OP_MADM;
+   case BRW_OPCODE_MATH:     return GEN_OP_MATH;
+   case BRW_OPCODE_MOV:      return GEN_OP_MOV;
+   case BRW_OPCODE_MOVI:     return GEN_OP_MOVI;
+   case BRW_OPCODE_MUL:      return GEN_OP_MUL;
+   case BRW_OPCODE_NOP:      return GEN_OP_NOP;
+   case BRW_OPCODE_NOT:      return GEN_OP_NOT;
+   case BRW_OPCODE_OR:       return GEN_OP_OR;
+   case BRW_OPCODE_PLN:      return GEN_OP_PLN;
+   case BRW_OPCODE_RET:      return GEN_OP_RET;
+   case BRW_OPCODE_RNDD:     return GEN_OP_RNDD;
+   case BRW_OPCODE_RNDE:     return GEN_OP_RNDE;
+   case BRW_OPCODE_RNDU:     return GEN_OP_RNDU;
+   case BRW_OPCODE_RNDZ:     return GEN_OP_RNDZ;
+   case BRW_OPCODE_ROL:      return GEN_OP_ROL;
+   case BRW_OPCODE_ROR:      return GEN_OP_ROR;
+   case BRW_OPCODE_SEL:      return GEN_OP_SEL;
+   case BRW_OPCODE_SEND:     return GEN_OP_SEND;
+   case BRW_OPCODE_SENDC:    return GEN_OP_SENDC;
+   case BRW_OPCODE_SENDS:    return GEN_OP_SENDS;
+   case BRW_OPCODE_SENDSC:   return GEN_OP_SENDSC;
+   case BRW_OPCODE_SHL:      return GEN_OP_SHL;
+   case BRW_OPCODE_SHR:      return GEN_OP_SHR;
+   case BRW_OPCODE_SMOV:     return GEN_OP_SMOV;
+   case BRW_OPCODE_SRND:     return GEN_OP_SRND;
+   case BRW_OPCODE_SUBB:     return GEN_OP_SUBB;
+   case BRW_OPCODE_SYNC:     return GEN_OP_SYNC;
+   case BRW_OPCODE_WAIT:     return GEN_OP_WAIT;
+   case BRW_OPCODE_WHILE:    return GEN_OP_WHILE;
+   case BRW_OPCODE_XOR:      return GEN_OP_XOR;
+
+   default:                  UNREACHABLE("invalid gen opcode");
+   }
+}
+
+static inline gen_region
+gen_region_from_reg(brw_reg r)
+{
+   uint8_t v = r.vstride == 0                                   ? 0 :
+               r.vstride == BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL ? GEN_VSTRIDE_ONE_DIMENSIONAL :
+                                                                  (1 << (r.vstride - 1));
+   uint8_t w = 1 << r.width;
+   uint8_t h = r.hstride == 0 ? 0 : (1 << (r.hstride - 1));
+   return {v, w, h};
+}
+
+gen_file
+brw_generator_gen::to_gen(brw_reg_file file)
+{
+   switch (file) {
+   case BAD_FILE:  return GEN_BAD_FILE;
+   case ARF:       return GEN_ARF;
+   case ADDRESS:   return GEN_ARF;
+   case FIXED_GRF: return GEN_GRF;
+   case IMM:       return GEN_IMM;
+   default:        UNREACHABLE("invalid reg file to convert");
+   }
+}
+
+gen_operand
+brw_generator_gen::to_gen(brw_reg r, bool align16)
+{
+   gen_operand o = {};
+
+   o.type = (gen_reg_type) r.type;
+   o.file = to_gen(r.file);
+   o.indirect = r.address_mode;
+   o.negate = r.negate;
+   o.abs = r.abs;
+
+   if (o.indirect) {
+      o.region = gen_region_from_reg(r);
+      o.addr_imm = r.indirect_offset;
+   } else {
+      if (r.file == IMM) {
+         o.imm = r.u64;
+      } else if (r.file == ADDRESS) {
+         o.nr = BRW_ARF_ADDRESS;
+         o.subnr = phys_subnr(devinfo, r);
+         o.region = gen_region_from_reg(r);
+      } else {
+         o.nr = phys_nr(devinfo, r);
+         o.subnr = phys_subnr(devinfo, r);
+         o.region = gen_region_from_reg(r);
+      }
+   }
+
+   if (align16) {
+      o.writemask = r.writemask;
+      o.swizzle = r.swizzle;
+      o.rep_ctrl = o.region.vstride == 0;
+   }
+
+   return o;
+}
+
+gen_swsb
+brw_generator_gen::to_gen(tgl_swsb swsb)
+{
+   STATIC_ASSERT(int(GEN_PIPE_NONE)   == int(TGL_PIPE_NONE));
+   STATIC_ASSERT(int(GEN_PIPE_FLOAT)  == int(TGL_PIPE_FLOAT));
+   STATIC_ASSERT(int(GEN_PIPE_INT)    == int(TGL_PIPE_INT));
+   STATIC_ASSERT(int(GEN_PIPE_LONG)   == int(TGL_PIPE_LONG));
+   STATIC_ASSERT(int(GEN_PIPE_MATH)   == int(TGL_PIPE_MATH));
+   STATIC_ASSERT(int(GEN_PIPE_SCALAR) == int(TGL_PIPE_SCALAR));
+   STATIC_ASSERT(int(GEN_PIPE_ALL)    == int(TGL_PIPE_ALL));
+
+   gen_swsb gen;
+   gen.mode = (gen_sbid_mode) swsb.mode;
+   gen.pipe = (gen_pipe) swsb.pipe;
+   gen.regdist = swsb.regdist;
+   gen.sbid = swsb.sbid;
+   return gen;
+}
+
+static gen_math
+gen_math_func_for_opcode(enum opcode op)
+{
+   switch (op) {
+   case SHADER_OPCODE_RCP:           return GEN_MATH_INV;
+   case SHADER_OPCODE_RSQ:           return GEN_MATH_RSQ;
+   case SHADER_OPCODE_SQRT:          return GEN_MATH_SQRT;
+   case SHADER_OPCODE_EXP2:          return GEN_MATH_EXP;
+   case SHADER_OPCODE_LOG2:          return GEN_MATH_LOG;
+   case SHADER_OPCODE_POW:           return GEN_MATH_POW;
+   case SHADER_OPCODE_SIN:           return GEN_MATH_SIN;
+   case SHADER_OPCODE_COS:           return GEN_MATH_COS;
+   case SHADER_OPCODE_INT_QUOTIENT:  return GEN_MATH_INT_DIV_QUOTIENT;
+   case SHADER_OPCODE_INT_REMAINDER: return GEN_MATH_INT_DIV_REMAINDER;
    default:
       UNREACHABLE("not reached: unknown math function");
    }
@@ -79,10 +236,9 @@ brw_generator_gen::brw_generator_gen(const struct brw_compiler *compiler,
      devinfo(compiler->devinfo),
      prog_data(prog_data), dispatch_width(0),
      debug_flag(false),
-     shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx)
+     shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx),
+     next_annotation(NULL)
 {
-   p = rzalloc(mem_ctx, struct brw_codegen);
-   brw_init_codegen(&compiler->isa, p, mem_ctx);
 }
 
 brw_generator_gen::~brw_generator_gen()
@@ -106,19 +262,51 @@ brw_generator_gen::generate_send(brw_send_inst *inst,
       assert(payload2.nr == BRW_ARF_NULL);
    }
 
-   brw_SEND(p, inst->sfid, dst, payload, payload2,
-            desc, ex_desc,
-            inst->ex_desc_imm ? inst->offset : 0,
-            inst->ex_mlen, ex_bso,
-            inst->eot, gather);
+   const brw_send_inst *send = inst->as_send();
+   gen_inst *gen = append(devinfo->ver >= 12 ? BRW_OPCODE_SEND
+                                             : BRW_OPCODE_SENDS);
+   gen->send.eot = send->eot;
+   gen->send.sfid = (gen_sfid) send->sfid;
 
-   if (inst->check_tdr)
-      brw_eu_inst_set_opcode(p->isa, brw_eu_last_inst(p),
-                             devinfo->ver >= 12 ? BRW_OPCODE_SENDC : BRW_OPCODE_SENDSC);
+   gen->dst.file = to_gen(dst.file);
+   gen->dst.nr = phys_nr(devinfo, dst);
+   gen->dst.type = GEN_TYPE_UD;
+
+   gen->src[0] = to_gen(payload);
+   gen->src[1] = to_gen(payload2);
+
+   if (desc.file == IMM)
+      gen->send.desc_imm = desc.ud;
+   else
+      gen->send.desc_is_reg = true;
+
+   if (ex_desc.file == IMM) {
+      gen->send.ex_desc_imm = ex_desc.ud;
+   } else {
+      gen->send.ex_desc_is_reg = true;
+      gen->send.ex_desc_subnr = ex_desc.subnr;
+
+      if (inst->ex_desc_imm)
+         gen->send.ex_desc_imm_extra = inst->offset;
+   }
+
+   if (ex_bso) {
+      gen->send.ex_bso = true;
+      gen->send.src1_len = inst->ex_mlen / reg_unit(devinfo);
+   }
+
+   if (devinfo->ver >= 20 && gen->send.sfid == GEN_SFID_UGM) {
+      gen->send.src1_len = inst->ex_mlen / reg_unit(devinfo);
+   }
+
+   if (send->check_tdr) {
+      if      (gen->opcode == GEN_OP_SEND)  gen->opcode = GEN_OP_SENDC;
+      else if (gen->opcode == GEN_OP_SENDS) gen->opcode = GEN_OP_SENDSC;
+   }
 
    /* Serialize messages if needed */
    if (devinfo->ver == 12 && inst->fused_eu_disable)
-      brw_eu_inst_set_fusion_ctrl(devinfo, brw_eu_last_inst(p), true);
+      gen->fusion_control = true;
 }
 
 void
@@ -141,13 +329,13 @@ brw_generator_gen::generate_mov_indirect(brw_inst *inst,
       reg.nr = imm_byte_offset / REG_SIZE;
       reg.subnr = imm_byte_offset % REG_SIZE;
       if (brw_type_size_bytes(reg.type) > 4 && !devinfo->has_64bit_int) {
-         brw_MOV(p, subscript(dst, BRW_TYPE_D, 0),
+         append_MOV(subscript(dst, BRW_TYPE_D, 0),
                     subscript(reg, BRW_TYPE_D, 0));
-         brw_set_default_swsb(p, tgl_swsb_null());
-         brw_MOV(p, subscript(dst, BRW_TYPE_D, 1),
+         current_state()->swsb = to_gen(tgl_swsb_null());
+         append_MOV(subscript(dst, BRW_TYPE_D, 1),
                     subscript(reg, BRW_TYPE_D, 1));
       } else {
-         brw_MOV(p, dst, reg);
+         append_MOV(dst, reg);
       }
    } else {
       /* We use VxH indirect addressing, clobbering a0.0 through a0.7. */
@@ -158,7 +346,7 @@ brw_generator_gen::generate_mov_indirect(brw_inst *inst,
        */
       const bool use_dep_ctrl = !inst->predicate &&
                                 inst->exec_size == dispatch_width;
-      brw_eu_inst *insn;
+      gen_inst *gen;
 
       /* The destination stride of an instruction (in bytes) must be greater
        * than or equal to the size of the rest of the instruction.  Since the
@@ -200,19 +388,19 @@ brw_generator_gen::generate_mov_indirect(brw_inst *inst,
        * initializing the whole address register with a pipelined NoMask MOV
        * instruction.
        */
-      insn = brw_MOV(p, addr, brw_imm_uw(imm_byte_offset));
-      brw_eu_inst_set_mask_control(devinfo, insn, BRW_MASK_DISABLE);
-      brw_eu_inst_set_pred_control(devinfo, insn, BRW_PREDICATE_NONE);
+      gen = append_MOV(addr, brw_imm_uw(imm_byte_offset));
+      gen->no_mask = true;
+      gen->pred_control = GEN_PREDICATE_NONE;
       if (devinfo->ver >= 12)
-         brw_set_default_swsb(p, tgl_swsb_null());
+         current_state()->swsb = to_gen(tgl_swsb_null());
       else
-         brw_eu_inst_set_no_dd_clear(devinfo, insn, use_dep_ctrl);
+         gen->no_dd_clear = use_dep_ctrl;
 
-      insn = brw_ADD(p, addr, indirect_byte_offset, brw_imm_uw(imm_byte_offset));
+      gen = append(BRW_OPCODE_ADD, addr, indirect_byte_offset, brw_imm_uw(imm_byte_offset));
       if (devinfo->ver >= 12)
-         brw_set_default_swsb(p, tgl_swsb_regdist(1));
+         current_state()->swsb = to_gen(tgl_swsb_regdist(1));
       else
-         brw_eu_inst_set_no_dd_check(devinfo, insn, use_dep_ctrl);
+         gen->no_dd_check = use_dep_ctrl;
 
       if (brw_type_size_bytes(reg.type) > 4 &&
           (devinfo->ver != 9 || intel_device_info_is_9lp(devinfo))) {
@@ -236,15 +424,15 @@ brw_generator_gen::generate_mov_indirect(brw_inst *inst,
           * the indirect here to handle adding 4 bytes to the offset and
           * avoid the extra ADD to the register file.
           */
-         brw_MOV(p, subscript(dst, BRW_TYPE_D, 0),
+         append_MOV(subscript(dst, BRW_TYPE_D, 0),
                     retype(brw_VxH_indirect(0, 0), BRW_TYPE_D));
-         brw_set_default_swsb(p, tgl_swsb_null());
-         brw_MOV(p, subscript(dst, BRW_TYPE_D, 1),
+         current_state()->swsb = to_gen(tgl_swsb_null());
+         append_MOV(subscript(dst, BRW_TYPE_D, 1),
                     retype(brw_VxH_indirect(0, 4), BRW_TYPE_D));
       } else {
          struct brw_reg ind_src = brw_VxH_indirect(0, 0);
 
-         brw_MOV(p, dst, retype(ind_src, reg.type));
+         append_MOV(dst, retype(ind_src, reg.type));
       }
    }
 }
@@ -276,9 +464,9 @@ brw_generator_gen::generate_shuffle(brw_inst *inst,
       lower_width = 8;
    }
 
-   brw_set_default_exec_size(p, cvt(lower_width) - 1);
+   current_state()->exec_size = lower_width;
    for (unsigned group = 0; group < inst->exec_size; group += lower_width) {
-      brw_set_default_group(p, group);
+      current_state()->chan_offset = group;
 
       if ((src.vstride == 0 && src.hstride == 0) ||
           idx.file == IMM) {
@@ -289,7 +477,7 @@ brw_generator_gen::generate_shuffle(brw_inst *inst,
          const unsigned i = idx.file == IMM ? idx.ud : 0;
          struct brw_reg group_src = stride(suboffset(src, i), 0, 1, 0);
          struct brw_reg group_dst = suboffset(dst, group << (dst.hstride - 1));
-         brw_MOV(p, group_dst, group_src);
+         append_MOV(group_dst, group_src);
       } else {
          /* We use VxH indirect addressing, clobbering a0.0 through a0.7. */
          struct brw_reg addr = vec8(brw_address_reg(0));
@@ -333,7 +521,7 @@ brw_generator_gen::generate_shuffle(brw_inst *inst,
           */
          const bool use_dep_ctrl = !inst->predicate &&
                                    lower_width == dispatch_width;
-         brw_eu_inst *insn;
+         gen_inst *gen;
 
          /* Due to a hardware bug some platforms (particularly Gfx11+) seem
           * to require the address components of all channels to be valid
@@ -342,31 +530,31 @@ brw_generator_gen::generate_shuffle(brw_inst *inst,
           * around that by initializing the whole address register with a
           * pipelined NoMask MOV instruction.
           */
-         insn = brw_MOV(p, addr, brw_imm_uw(src_start_offset));
-         brw_eu_inst_set_mask_control(devinfo, insn, BRW_MASK_DISABLE);
-         brw_eu_inst_set_pred_control(devinfo, insn, BRW_PREDICATE_NONE);
+         gen = append_MOV(addr, brw_imm_uw(src_start_offset));
+         gen->no_mask = true;
+         gen->pred_control = GEN_PREDICATE_NONE;
          if (devinfo->ver >= 12)
-            brw_set_default_swsb(p, tgl_swsb_null());
+            current_state()->swsb = to_gen(tgl_swsb_null());
          else
-            brw_eu_inst_set_no_dd_clear(devinfo, insn, use_dep_ctrl);
+            gen->no_dd_clear = use_dep_ctrl;
 
          /* Take into account the component size and horizontal stride. */
          assert(src.vstride == src.hstride + src.width);
-         insn = brw_SHL(p, addr, group_idx,
-                        brw_imm_uw(util_logbase2(brw_type_size_bytes(src.type)) +
-                                   src.hstride - 1));
+         gen = append(BRW_OPCODE_SHL, addr, group_idx,
+                      brw_imm_uw(util_logbase2(brw_type_size_bytes(src.type)) +
+                                 src.hstride - 1));
          if (devinfo->ver >= 12)
-            brw_set_default_swsb(p, tgl_swsb_regdist(1));
+            current_state()->swsb = to_gen(tgl_swsb_regdist(1));
          else
-            brw_eu_inst_set_no_dd_check(devinfo, insn, use_dep_ctrl);
+            gen->no_dd_check = use_dep_ctrl;
 
          /* Add on the register start offset */
-         brw_ADD(p, addr, addr, brw_imm_uw(src_start_offset));
-         brw_MOV(p, suboffset(dst, group << (dst.hstride - 1)),
-                 retype(brw_VxH_indirect(0, 0), src.type));
+         append(BRW_OPCODE_ADD, addr, addr, brw_imm_uw(src_start_offset));
+         append(BRW_OPCODE_MOV, suboffset(dst, group << (dst.hstride - 1)),
+                                retype(brw_VxH_indirect(0, 0), src.type));
       }
 
-      brw_set_default_swsb(p, tgl_swsb_null());
+      current_state()->swsb = to_gen(tgl_swsb_null());
    }
 }
 
@@ -381,17 +569,17 @@ brw_generator_gen::generate_quad_swizzle(const brw_inst *inst,
    if (src.file == IMM ||
        has_scalar_region(src)) {
       /* The value is uniform across all channels */
-      brw_MOV(p, dst, src);
+      append_MOV(dst, src);
 
-   } else if (devinfo->ver < 11 && brw_type_size_bytes(src.type) == 4) {
+   } else if (devinfo->ver == 9 && brw_type_size_bytes(src.type) == 4) {
       /* This only works on 8-wide 32-bit values */
       assert(inst->exec_size == 8);
       assert(src.hstride == BRW_HORIZONTAL_STRIDE_1);
       assert(src.vstride == src.width + 1);
-      brw_set_default_access_mode(p, BRW_ALIGN_16);
+      current_state()->align16 = true;
       struct brw_reg swiz_src = stride(src, 4, 4, 1);
       swiz_src.swizzle = swiz;
-      brw_MOV(p, dst, swiz_src);
+      append_MOV(dst, swiz_src);
 
    } else {
       assert(src.hstride == BRW_HORIZONTAL_STRIDE_1);
@@ -403,36 +591,36 @@ brw_generator_gen::generate_quad_swizzle(const brw_inst *inst,
       case BRW_SWIZZLE_YYYY:
       case BRW_SWIZZLE_ZZZZ:
       case BRW_SWIZZLE_WWWW:
-         brw_MOV(p, dst, stride(src_0, 4, 4, 0));
+         append_MOV(dst, stride(src_0, 4, 4, 0));
          break;
 
       case BRW_SWIZZLE_XXZZ:
       case BRW_SWIZZLE_YYWW:
-         brw_MOV(p, dst, stride(src_0, 2, 2, 0));
+         append_MOV(dst, stride(src_0, 2, 2, 0));
          break;
 
       case BRW_SWIZZLE_XYXY:
       case BRW_SWIZZLE_ZWZW:
          assert(inst->exec_size == 4);
-         brw_MOV(p, dst, stride(src_0, 0, 2, 1));
+         append_MOV(dst, stride(src_0, 0, 2, 1));
          break;
 
       default:
          assert(inst->force_writemask_all);
-         brw_set_default_exec_size(p, cvt(inst->exec_size / 4) - 1);
+         current_state()->exec_size = inst->exec_size / 4;
 
          for (unsigned c = 0; c < 4; c++) {
-            brw_eu_inst *insn = brw_MOV(
-               p, stride(suboffset(dst, c),
-                         4 * inst->dst.stride, 1, 4 * inst->dst.stride),
+            gen_inst *gen = append_MOV(
+               stride(suboffset(dst, c),
+                      4 * inst->dst.stride, 1, 4 * inst->dst.stride),
                stride(suboffset(src, BRW_GET_SWZ(swiz, c)), 4, 1, 0));
 
             if (devinfo->ver < 12) {
-               brw_eu_inst_set_no_dd_clear(devinfo, insn, c < 3);
-               brw_eu_inst_set_no_dd_check(devinfo, insn, c > 0);
+               gen->no_dd_clear = c < 3;
+               gen->no_dd_check = c > 0;
             }
 
-            brw_set_default_swsb(p, tgl_swsb_null());
+            current_state()->swsb = to_gen(tgl_swsb_null());
          }
 
          break;
@@ -443,12 +631,29 @@ brw_generator_gen::generate_quad_swizzle(const brw_inst *inst,
 void
 brw_generator_gen::generate_barrier(brw_inst *, struct brw_reg src)
 {
-   brw_barrier(p, src);
+   gen_inst *gen = append(devinfo->ver >= 12 ? BRW_OPCODE_SEND : BRW_OPCODE_SENDS,
+                          retype(brw_null_reg(), BRW_TYPE_UD),
+                          src,
+                          brw_null_reg());
+
+   uint32_t desc =
+      brw_message_desc(devinfo, 1 * reg_unit(devinfo), 0, false);
+   desc |= (uint32_t)BRW_MESSAGE_GATEWAY_SFID_BARRIER_MSG;
+   gen->align16 = false;
+   gen->send.sfid = GEN_SFID_MESSAGE_GATEWAY;
+   gen->send.desc_imm = desc;
+   gen->no_mask = true;
+
    if (devinfo->ver >= 12) {
-      brw_set_default_swsb(p, tgl_swsb_null());
-      brw_SYNC(p, TGL_SYNC_BAR);
+      current_state()->swsb = to_gen(tgl_swsb_null());
+      append_SYNC(GEN_SYNC_BAR);
    } else {
-      brw_WAIT(p);
+      gen = append(BRW_OPCODE_WAIT,
+                   brw_notification_reg(),
+                   brw_notification_reg(),
+                   brw_null_reg());
+      gen->exec_size = 1;
+      gen->no_mask = true;
    }
 }
 
@@ -506,7 +711,7 @@ brw_generator_gen::generate_ddx(const brw_inst *inst,
    src1.width   = width;
    src1.hstride = BRW_HORIZONTAL_STRIDE_0;
 
-   brw_ADD(p, dst, src0, negate(src1));
+   append(BRW_OPCODE_ADD, dst, src0, negate(src1));
 }
 
 /* The negate_value boolean is used to negate the derivative computation for
@@ -536,33 +741,171 @@ brw_generator_gen::generate_ddy(const brw_inst *inst,
       if (devinfo->ver >= 11) {
          src = stride(src, 0, 2, 1);
 
-         brw_push_insn_state(p);
-         brw_set_default_exec_size(p, BRW_EXECUTE_4);
+         push_state();
+         current_state()->exec_size = 4;
          for (uint32_t g = 0; g < inst->exec_size; g += 4) {
-            brw_set_default_group(p, inst->group + g);
-            brw_ADD(p, byte_offset(dst, g * type_size),
-                       negate(byte_offset(src,  g * type_size)),
-                       byte_offset(src, (g + 2) * type_size));
-            brw_set_default_swsb(p, tgl_swsb_null());
+            gen_inst *gen = append(BRW_OPCODE_ADD,
+                                   byte_offset(dst, g * type_size),
+                                   negate(byte_offset(src,  g * type_size)),
+                                   byte_offset(src, (g + 2) * type_size));
+            gen->chan_offset = inst->group + g;
+
+            current_state()->swsb = to_gen(tgl_swsb_null());
          }
-         brw_pop_insn_state(p);
+         pop_state();
       } else {
+         push_state();
+         current_state()->align16 = true;
+
          struct brw_reg src0 = stride(src, 4, 4, 1);
          struct brw_reg src1 = stride(src, 4, 4, 1);
          src0.swizzle = BRW_SWIZZLE_XYXY;
          src1.swizzle = BRW_SWIZZLE_ZWZW;
 
-         brw_push_insn_state(p);
-         brw_set_default_access_mode(p, BRW_ALIGN_16);
-         brw_ADD(p, dst, negate(src0), src1);
-         brw_pop_insn_state(p);
+         append(BRW_OPCODE_ADD, dst, negate(src0), src1);
+         pop_state();
       }
    } else {
       /* replicate the derivative at the top-left pixel to other pixels */
       struct brw_reg src0 = byte_offset(stride(src, 4, 4, 0), 0 * type_size);
       struct brw_reg src1 = byte_offset(stride(src, 4, 4, 0), 2 * type_size);
 
-      brw_ADD(p, dst, negate(src0), src1);
+      append(BRW_OPCODE_ADD, dst, negate(src0), src1);
+   }
+}
+
+void
+brw_generator_gen::generate_broadcast(brw_reg dst, brw_reg src, brw_reg idx)
+{
+   push_state();
+   current_state()->no_mask = true;
+   current_state()->exec_size = 1;
+
+   assert(src.file == FIXED_GRF &&
+          src.address_mode == BRW_ADDRESS_DIRECT);
+   assert(!src.abs && !src.negate);
+   assert(brw_type_is_uint(src.type));
+   assert(src.type == dst.type);
+
+   if ((src.vstride == 0 && src.hstride == 0) ||
+       idx.file == IMM) {
+      /* Trivial, the source is already uniform or the index is a constant.
+       * We will typically not get here if the optimizer is doing its job, but
+       * asserting would be mean.
+       */
+      const unsigned i = (src.vstride == 0 && src.hstride == 0) ? 0 : idx.ud;
+      src = stride(suboffset(src, i), 0, 1, 0);
+
+      if (brw_type_size_bytes(src.type) > 4 && !devinfo->has_64bit_int) {
+         append_MOV(subscript(dst, BRW_TYPE_D, 0),
+                    subscript(src, BRW_TYPE_D, 0));
+         current_state()->swsb = to_gen(tgl_swsb_null());
+         append_MOV(subscript(dst, BRW_TYPE_D, 1),
+                    subscript(src, BRW_TYPE_D, 1));
+      } else {
+         append_MOV(dst, src);
+      }
+   } else {
+      /* From the Haswell PRM section "Register Region Restrictions":
+       *
+       *    "The lower bits of the AddressImmediate must not overflow to
+       *    change the register address.  The lower 5 bits of Address
+       *    Immediate when added to lower 5 bits of address register gives
+       *    the sub-register offset. The upper bits of Address Immediate
+       *    when added to upper bits of address register gives the register
+       *    address. Any overflow from sub-register offset is dropped."
+       *
+       * Fortunately, for broadcast, we never have a sub-register offset so
+       * this isn't an issue.
+       */
+      assert(src.subnr == 0);
+
+      const struct brw_reg addr =
+         retype(brw_address_reg(0), BRW_TYPE_UD);
+      unsigned offset = src.nr * REG_SIZE + src.subnr;
+      /* Limit in bytes of the signed indirect addressing immediate. */
+      const unsigned limit = 512;
+
+      push_state();
+      current_state()->no_mask = true;
+      current_state()->pred_control = GEN_PREDICATE_NONE;
+      current_state()->flag_nr = 0;
+      current_state()->flag_subnr = 0;
+
+      /* Take into account the component size and horizontal stride. */
+      assert(src.vstride == src.hstride + src.width);
+      append(BRW_OPCODE_SHL, addr, vec1(idx),
+             brw_imm_ud(util_logbase2(brw_type_size_bytes(src.type)) +
+                        src.hstride - 1));
+
+      /* We can only address up to limit bytes using the indirect
+       * addressing immediate, account for the difference if the source
+       * register is above this limit.
+       */
+      if (offset >= limit) {
+         current_state()->swsb = to_gen(tgl_swsb_regdist(1));
+         append(BRW_OPCODE_ADD, addr, addr, brw_imm_ud(offset - offset % limit));
+         offset = offset % limit;
+      }
+
+      pop_state();
+
+      current_state()->swsb = to_gen(tgl_swsb_regdist(1));
+
+      /* Use indirect addressing to fetch the specified component. */
+      if (brw_type_size_bytes(src.type) > 4 &&
+          (intel_device_info_is_9lp(devinfo) || !devinfo->has_64bit_int)) {
+         /* From the Cherryview PRM Vol 7. "Register Region Restrictions":
+          *
+          *   "When source or destination datatype is 64b or operation is
+          *    integer DWord multiply, indirect addressing must not be
+          *    used."
+          *
+          * We may also not support Q/UQ types.
+          *
+          * To work around both of these, we do two integer MOVs instead
+          * of one 64-bit MOV.  Because no double value should ever cross
+          * a register boundary, it's safe to use the immediate offset in
+          * the indirect here to handle adding 4 bytes to the offset and
+          * avoid the extra ADD to the register file.
+          */
+         append_MOV(subscript(dst, BRW_TYPE_D, 0),
+                    retype(brw_vec1_indirect(addr.subnr, offset),
+                           BRW_TYPE_D));
+         current_state()->swsb = to_gen(tgl_swsb_null());
+         append_MOV(subscript(dst, BRW_TYPE_D, 1),
+                    retype(brw_vec1_indirect(addr.subnr, offset + 4),
+                           BRW_TYPE_D));
+      } else {
+         append_MOV(dst,
+                    retype(brw_vec1_indirect(addr.subnr, offset), src.type));
+      }
+   }
+
+   pop_state();
+}
+
+void
+brw_generator_gen::generate_math(brw_reg dst, brw_reg src0, brw_reg src1,
+                                 gen_math func)
+{
+   gen_inst *gen = append(BRW_OPCODE_MATH, dst, src0, src1);
+   gen->math.func = func;
+
+   /* This workaround says that we cannot use scalar broadcast with HF types.
+    * However, for is_scalar values, all 16 elements contain the same value, so
+    * we can replace a <0,1,0> region with <16,16,1> without ill effect.
+    */
+   if (intel_needs_workaround(devinfo, 22016140776)) {
+      if (src0.is_scalar && src0.type == BRW_TYPE_HF) {
+         gen->src[0].region = { 16, 16, 1 };
+         gen->src[0].swizzle = BRW_SWIZZLE_XYZW;
+      }
+
+      if (src1.is_scalar && src1.type == BRW_TYPE_HF) {
+         gen->src[1].region = { 16, 16, 1 };
+         gen->src[1].swizzle = BRW_SWIZZLE_XYZW;
+      }
    }
 }
 
@@ -619,26 +962,69 @@ brw_generator_gen::generate_scratch_header(brw_inst *inst,
 
    dst.type = BRW_TYPE_UD;
 
-   brw_eu_inst *insn = brw_MOV(p, dst, brw_imm_ud(0));
+   gen_inst *gen;
+
+   gen = append_MOV(dst, brw_imm_ud(0));
+
    if (devinfo->ver >= 12)
-      brw_set_default_swsb(p, tgl_swsb_null());
+      current_state()->swsb = to_gen(tgl_swsb_null());
    else
-      brw_eu_inst_set_no_dd_clear(p->devinfo, insn, true);
+      gen->no_dd_clear = true;
 
    /* Copy the per-thread scratch space size from g0.3[3:0] */
-   brw_set_default_exec_size(p, BRW_EXECUTE_1);
-   insn = brw_AND(p, suboffset(dst, 3), component(src, 3),
-                     brw_imm_ud(INTEL_MASK(3, 0)));
+   current_state()->exec_size = 1;
+
+   gen = append(BRW_OPCODE_AND, suboffset(dst, 3), component(src, 3),
+                brw_imm_ud(INTEL_MASK(3, 0)));
    if (devinfo->ver < 12) {
-      brw_eu_inst_set_no_dd_clear(p->devinfo, insn, true);
-      brw_eu_inst_set_no_dd_check(p->devinfo, insn, true);
+      gen->no_dd_clear = true;
+      gen->no_dd_check = true;
    }
 
    /* Copy the scratch base address from g0.5[31:10] */
-   insn = brw_AND(p, suboffset(dst, 5), component(src, 5),
-                     brw_imm_ud(INTEL_MASK(31, 10)));
+   gen = append(BRW_OPCODE_AND, suboffset(dst, 5), component(src, 5),
+                brw_imm_ud(INTEL_MASK(31, 10)));
    if (devinfo->ver < 12)
-      brw_eu_inst_set_no_dd_check(p->devinfo, insn, true);
+      gen->no_dd_check = true;
+}
+
+void
+brw_generator_gen::generate_float_controls_mode(unsigned mode, unsigned mask)
+{
+   assert(current_state()->no_mask == true);
+
+   /* From the Skylake PRM, Volume 7, page 760:
+    *  "Implementation Restriction on Register Access: When the control
+    *   register is used as an explicit source and/or destination, hardware
+    *   does not ensure execution pipeline coherency. Software must set the
+    *   thread control field to ‘switch’ for an instruction that uses
+    *   control register as an explicit operand."
+    *
+    * On Gfx12+ this is implemented in terms of SWSB annotations instead.
+    */
+   current_state()->swsb = to_gen(tgl_swsb_regdist(1));
+
+   gen_inst *inst = append(BRW_OPCODE_AND,
+                           brw_cr0_reg(0),
+                           brw_cr0_reg(0),
+                           brw_imm_ud(~mask));
+   inst->exec_size = 1;
+
+   if (devinfo->ver < 12)
+      inst->thread_control = BRW_THREAD_SWITCH;
+
+   if (mode) {
+      gen_inst *inst_or = append(BRW_OPCODE_OR,
+                                 brw_cr0_reg(0),
+                                 brw_cr0_reg(0),
+                                 brw_imm_ud(mode));
+      inst_or->exec_size = 1;
+      if (devinfo->ver < 12)
+         inst_or->thread_control = BRW_THREAD_SWITCH;
+   }
+
+   if (devinfo->ver >= 12)
+      append_SYNC(GEN_SYNC_NOP);
 }
 
 void
@@ -648,36 +1034,56 @@ brw_generator_gen::enable_debug(const char *shader_name)
    this->shader_name = shader_name;
 }
 
+static gen_operand
+gen_null()
+{
+   return {
+      .file   = GEN_ARF,
+      .region = { 0, 1, 0 },
+      .nr     = BRW_ARF_NULL,
+   };
+}
+
 int
 brw_generator_gen::generate_code(const brw_shader &s,
-                                 struct genisa_stats *stats)
+                                 struct genisa_stats *stats, int& out_size)
 {
    const int dispatch_width = s.dispatch_width;
    struct brw_shader_stats shader_stats = s.shader_stats;
    const brw_performance &perf = s.performance_analysis.require();
 
-   /* align to 64 byte boundary. */
-   brw_realign(p, 64);
-
    this->dispatch_width = dispatch_width;
-   this->final_halt_offset = -1;
+   this->final_halt_idx = -1;
    this->needs_final_halt = false;
-
-   int start_offset = p->next_insn_offset;
 
    int loop_count = 0, send_count = 0, nop_count = 0, sync_nop_count = 0;
    bool is_accum_used = false;
 
-   struct disasm_info *disasm_info = disasm_initialize(p->isa, s.cfg);
-   const bool annotate = debug_flag || params->archiver;
+   const bool annotate = INTEL_DEBUG(DEBUG_ANNOTATION) &&
+                         (debug_flag || params->archiver);
+
+   std::vector<std::pair<unsigned, unsigned>> if_stack;
+   std::vector<unsigned> loop_stack;
+
+   const linear_opts lin_opts = {
+      .min_buffer_size = s.cfg->total_instructions * (unsigned)sizeof(gen_inst),
+   };
+   this->insts_store = linear_context_with_opts(mem_ctx, &lin_opts);
 
    brw_inst *prev_inst = NULL;
    foreach_block_and_inst (block, brw_inst, inst, s.cfg) {
       if (inst->opcode == SHADER_OPCODE_UNDEF)
          continue;
 
+      reset_state();
+
+#ifndef NDEBUG
+      if (unlikely(annotate))
+         next_annotation = NULL;
+#endif
+
       struct brw_reg src[4], dst;
-      unsigned int last_insn_offset = p->next_insn_offset;
+      unsigned int last_insn_offset = gen_insts.size();
       bool multiple_instructions_emitted = false;
       tgl_swsb swsb = inst->sched;
 
@@ -691,12 +1097,12 @@ brw_generator_gen::generate_code(const brw_shader &s,
        * and empirically this affects CHV as well.
        */
       if (devinfo->ver <= 9 &&
-          p->nr_insn > 1 &&
-          brw_eu_inst_opcode(p->isa, brw_eu_last_inst(p)) == BRW_OPCODE_MATH &&
-          brw_eu_inst_math_function(devinfo, brw_eu_last_inst(p)) == BRW_MATH_FUNCTION_POW &&
+          !gen_insts.empty() &&
+          gen_insts.back()->opcode == GEN_OP_MATH &&
+          gen_insts.back()->math.func == GEN_MATH_POW &&
           inst->dst.component_size(inst->exec_size) > REG_SIZE) {
-         brw_NOP(p);
-         last_insn_offset = p->next_insn_offset;
+         append_NOP();
+         last_insn_offset = gen_insts.size();
 
          /* In order to avoid spurious instruction count differences when the
           * instruction schedule changes, keep track of the number of inserted
@@ -711,15 +1117,17 @@ brw_generator_gen::generate_code(const brw_shader &s,
        */
       if (inst->eot && is_accum_used &&
           intel_needs_workaround(devinfo, 14010017096)) {
-         brw_set_default_exec_size(p, BRW_EXECUTE_16);
-         brw_set_default_group(p, 0);
-         brw_set_default_mask_control(p, BRW_MASK_DISABLE);
-         brw_set_default_predicate_control(p, BRW_PREDICATE_NONE);
-         brw_set_default_predicate_inverse(p, false);
-         brw_set_default_flag_reg(p, 0, 0);
-         brw_set_default_swsb(p, tgl_swsb_src_dep(swsb));
-         brw_MOV(p, brw_acc_reg(8), brw_imm_f(0.0f));
-         last_insn_offset = p->next_insn_offset;
+
+         gen_inst *gen = make_empty();
+         gen->opcode = GEN_OP_MOV;
+         gen->exec_size = 16;
+         gen->no_mask = true;
+         gen->swsb = to_gen(tgl_swsb_src_dep(swsb));
+         gen->dst = to_gen(brw_acc_reg(8));
+         gen->src[0] = to_gen(brw_imm_f(0.0f));
+         append(gen);
+
+         last_insn_offset = gen_insts.size();
          swsb = tgl_swsb_dst_dep(swsb, 1);
       }
 
@@ -734,21 +1142,26 @@ brw_generator_gen::generate_code(const brw_shader &s,
        */
       if (inst->eot && intel_needs_workaround(devinfo, 14013672992)) {
          if (tgl_swsb_src_dep(swsb).mode) {
-            brw_set_default_exec_size(p, BRW_EXECUTE_1);
-            brw_set_default_group(p, 0);
-            brw_set_default_mask_control(p, BRW_MASK_DISABLE);
-            brw_set_default_predicate_control(p, BRW_PREDICATE_NONE);
-            brw_set_default_flag_reg(p, 0, 0);
-            brw_set_default_swsb(p, tgl_swsb_src_dep(swsb));
-            brw_SYNC(p, TGL_SYNC_NOP);
-            last_insn_offset = p->next_insn_offset;
+            gen_inst *gen = make_empty();
+            gen->opcode = GEN_OP_SYNC;
+            gen->exec_size = 1;
+            gen->no_mask = true;
+            gen->swsb = to_gen(tgl_swsb_src_dep(swsb));
+            gen->dst = gen_null();
+            gen->src[0] = gen_null();
+            gen->sync.func = GEN_SYNC_NOP;
+            append(gen);
+
+            last_insn_offset = gen_insts.size();
          }
 
          swsb = tgl_swsb_dst_dep(swsb, 1);
       }
 
+#ifndef NDEBUG
       if (unlikely(annotate))
-         disasm_annotate(disasm_info, inst, p->next_insn_offset);
+         next_annotation = inst->annotation;
+#endif
 
       if (devinfo->ver >= 20 && inst->group % 8 != 0) {
          assert(inst->force_writemask_all);
@@ -756,9 +1169,9 @@ brw_generator_gen::generate_code(const brw_shader &s,
          assert(!inst->writes_accumulator_implicitly(devinfo) &&
                 !inst->reads_accumulator_implicitly());
          assert(inst->opcode != SHADER_OPCODE_SEL_EXEC);
-         brw_set_default_group(p, 0);
+         current_state()->chan_offset = 0;
       } else {
-         brw_set_default_group(p, inst->group);
+         current_state()->chan_offset = inst->group;
       }
 
       /* For SEND_GATHER, the payload sources are represented inside the
@@ -782,29 +1195,34 @@ brw_generator_gen::generate_code(const brw_shader &s,
       }
       dst = normalize_brw_reg_for_encoding(&inst->dst);
 
-      brw_set_default_access_mode(p, BRW_ALIGN_1);
-      brw_set_default_predicate_control(p, inst->predicate);
-      brw_set_default_predicate_inverse(p, inst->predicate_inverse);
-      /* On gfx7 and above, hardware automatically adds the group onto the
-       * flag subregister number.
-       */
-      const unsigned flag_subreg = inst->flag_subreg;
-      brw_set_default_flag_reg(p, flag_subreg / 2, flag_subreg % 2);
-      brw_set_default_saturate(p, inst->saturate);
-      brw_set_default_mask_control(p, inst->force_writemask_all);
-      if (devinfo->ver >= 20 && inst->writes_accumulator) {
-         assert(inst->dst.is_accumulator() ||
-                inst->opcode == BRW_OPCODE_ADDC ||
-                inst->opcode == BRW_OPCODE_MACH ||
-                inst->opcode == BRW_OPCODE_SUBB);
-      } else {
-         brw_set_default_acc_write_control(p, inst->writes_accumulator);
+      {
+         auto state = current_state();
+         state->align16 = false;
+         state->pred_control = (gen_predicate)inst->predicate;
+         state->pred_inv = inst->predicate_inverse;
+
+         /* On gfx7 and above, hardware automatically adds the group onto the
+          * flag subregister number.
+          */
+         state->flag_nr = inst->flag_subreg >> 1;
+         state->flag_subnr = inst->flag_subreg & 1;
+
+         state->saturate = inst->saturate;
+         state->no_mask = inst->force_writemask_all;
+
+         if (devinfo->ver >= 20 && inst->writes_accumulator) {
+            /* TODO: Make a validation check out of this. */
+            assert(inst->dst.is_accumulator() ||
+                   inst->opcode == BRW_OPCODE_ADDC ||
+                   inst->opcode == BRW_OPCODE_MACH ||
+                   inst->opcode == BRW_OPCODE_SUBB);
+         } else {
+            state->acc_wr_control = inst->writes_accumulator;
+         }
+
+         state->swsb = to_gen(swsb);
+         state->exec_size = inst->exec_size;
       }
-      brw_set_default_swsb(p, swsb);
-
-      unsigned exec_size = inst->exec_size;
-
-      brw_set_default_exec_size(p, cvt(exec_size) - 1);
 
       assert(inst->force_writemask_all || inst->exec_size >= 4);
       assert(inst->force_writemask_all || inst->group % inst->exec_size == 0);
@@ -813,11 +1231,12 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
       switch (inst->opcode) {
       case BRW_OPCODE_NOP:
-         brw_NOP(p);
+         append_NOP();
          break;
+
       case BRW_OPCODE_SYNC:
          assert(src[0].file == IMM);
-         brw_SYNC(p, tgl_sync_function(src[0].ud));
+         append_SYNC(gen_sync_func(src[0].ud));
 
          if (tgl_sync_function(src[0].ud) == TGL_SYNC_NOP)
             ++sync_nop_count;
@@ -831,7 +1250,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
       case BRW_OPCODE_RNDZ:
       case BRW_OPCODE_NOT:
       case BRW_OPCODE_LZD:
-	 brw_alu1(p, inst->opcode, dst, src[0]);
+	 append(inst->opcode, dst, src[0]);
 	 break;
 
       case BRW_OPCODE_ADD:
@@ -853,11 +1272,13 @@ brw_generator_gen::generate_code(const brw_shader &s,
       case BRW_OPCODE_SRND:
       case BRW_OPCODE_ROL:
       case BRW_OPCODE_ROR:
+      case BRW_OPCODE_CMP:
+      case BRW_OPCODE_CMPN:
          assert(inst->opcode != BRW_OPCODE_SRND || devinfo->ver >= 20);
          assert(inst->opcode != BRW_OPCODE_ROL || devinfo->ver >= 11);
          assert(inst->opcode != BRW_OPCODE_ROR || devinfo->ver >= 11);
 
-	 brw_alu2(p, inst->opcode, dst, src[0], src[1]);
+	 append(inst->opcode, dst, src[0], src[1]);
 	 break;
 
       case BRW_OPCODE_MAD:
@@ -867,82 +1288,147 @@ brw_generator_gen::generate_code(const brw_shader &s,
       case BRW_OPCODE_DP4A:
       case BRW_OPCODE_LRP:
       case BRW_OPCODE_ADD3:
+
+         // TODO: HERE: Handling BFI2 and swizzles!
+
          assert(inst->opcode != BRW_OPCODE_DP4A || devinfo->ver >= 12);
          assert(inst->opcode != BRW_OPCODE_LRP  || devinfo->ver == 9);
          assert(inst->opcode != BRW_OPCODE_ADD3 || devinfo->verx10 >= 125);
 
          if (devinfo->ver == 9)
-            brw_set_default_access_mode(p, BRW_ALIGN_16);
-         brw_alu3(p, inst->opcode, dst, src[0], src[1], src[2]);
+            current_state()->align16 = true;
+
+         append(inst->opcode, dst, src[0], src[1], src[2]);
 	 break;
 
       case BRW_OPCODE_DPAS: {
          assert(devinfo->verx10 >= 125);
          const brw_dpas_inst *dpas = inst->as_dpas();
-         brw_DPAS(p, translate_systolic_depth(dpas->sdepth), dpas->rcount,
-                  dst, src[0], src[1], src[2]);
+         gen_inst *gen = append(BRW_OPCODE_DPAS, dst, src[0], src[1], src[2]);
+         gen->dpas.sdepth = dpas->sdepth;
+         gen->dpas.rcount = dpas->rcount;
          break;
       }
 
-      case BRW_OPCODE_BFN:
-         brw_BFN(p, dst, src[0], src[1], src[2], src[3]);
+      case BRW_OPCODE_BFN: {
+         gen_inst *gen = append(inst->opcode, dst, src[0], src[1], src[2]);
+         gen->boolean_func_ctrl = src[3].ud;
          break;
-
-      case BRW_OPCODE_CMP:
-         brw_CMP(p, dst, inst->conditional_mod, src[0], src[1]);
-	 break;
-      case BRW_OPCODE_CMPN:
-         brw_CMPN(p, dst, inst->conditional_mod, src[0], src[1]);
-         break;
+      }
 
       case BRW_OPCODE_BFREV:
       case BRW_OPCODE_FBL:
       case BRW_OPCODE_CBIT:
-         brw_alu1(p, inst->opcode, retype(dst, BRW_TYPE_UD), retype(src[0], BRW_TYPE_UD));
+         append(inst->opcode, retype(dst, BRW_TYPE_UD), retype(src[0], BRW_TYPE_UD));
          break;
 
       case BRW_OPCODE_FBH:
-         brw_FBH(p, retype(dst, src[0].type), src[0]);
+         append(inst->opcode, retype(dst, src[0].type), src[0]);
          break;
 
-      case BRW_OPCODE_IF:
-         brw_IF(p, brw_get_default_exec_size(p));
-	 break;
+      case BRW_OPCODE_IF: {
+         gen_inst *gen = append(inst->opcode);
+         // TODO: Check if needed.
+         gen->chan_offset = 0;
+         gen->pred_control = GEN_PREDICATE_NORMAL;
+         gen->no_mask = false;
 
-      case BRW_OPCODE_ELSE:
-	 brw_ELSE(p);
+         /* UIP and JIP will be filled later. */
+
+         const unsigned if_idx = gen_insts.size()-1;
+         if_stack.push_back({if_idx, 0});
 	 break;
-      case BRW_OPCODE_ENDIF:
-	 brw_ENDIF(p);
+      }
+
+      case BRW_OPCODE_ELSE: {
+         gen_inst *gen = append(inst->opcode);
+         // TODO: Check if needed.
+         gen->chan_offset = 0;
+         gen->no_mask = false;
+
+         /* UIP and JIP will be filled later. */
+
+         const unsigned else_idx = gen_insts.size()-1;
+         if_stack.back().second = else_idx;
 	 break;
+      }
+
+      case BRW_OPCODE_ENDIF: {
+         assert(!if_stack.empty());
+
+         int else_idx = if_stack.back().second;
+         if_stack.pop_back();
+
+         if (devinfo->ver == 9 && else_idx) {
+            /* Insert a NOP to be specified as join instruction within the
+             * ELSE block, which is valid for an ELSE instruction with
+             * branch_ctrl on.  The ELSE instruction will be set to jump
+             * here instead of to the ENDIF instruction, since attempting to
+             * do the latter would prevent the ENDIF from being executed in
+             * some cases due to Wa_220160235, which could cause the program
+             * to continue running with all channels disabled.
+             */
+            append_NOP();
+            gen_inst *else_inst = gen_insts[else_idx];
+
+            const unsigned nop_idx = gen_insts.size()-1;
+            const unsigned endif_idx = nop_idx + 1;
+
+            else_inst->src[0].file = GEN_IMM;
+            else_inst->src[0].type = GEN_TYPE_D;
+            else_inst->src[0].imm = nop_idx;
+            else_inst->src[1].file = GEN_IMM;
+            else_inst->src[1].type = GEN_TYPE_D;
+            else_inst->src[1].imm = endif_idx;
+            else_inst->branch_control = true;
+         }
+
+         append(inst->opcode);
+	 break;
+      }
 
       case BRW_OPCODE_DO:
-	 brw_DO(p, brw_get_default_exec_size(p));
+         /* In Gfx9+ there's no actual hardware instruction for DO,
+          * so just keep track that the next instruction will
+          * start a loop.  Later WHILE will use this index.
+          */
+         loop_stack.push_back(gen_insts.size());
 	 break;
 
       case SHADER_OPCODE_FLOW:
+         // TODO: Move this up with UNDEF.
          /* Do nothing. */
          break;
 
       case BRW_OPCODE_BREAK:
-	 brw_BREAK(p);
-	 break;
       case BRW_OPCODE_CONTINUE:
-         brw_CONT(p);
+         assert(!loop_stack.empty());
+         append(inst->opcode);
+         // TODO: qtr control???
 	 break;
 
-      case BRW_OPCODE_WHILE:
+      case BRW_OPCODE_WHILE: {
          /* Workaround for an issue with branch prediction for WHILE
           * instructions that may lead to misrendering or GPU hangs.
           * See HSDs 22020521218 and 16026360541.
           */
          if (devinfo->ver >= 20 && prev_inst &&
              unlikely(prev_inst->is_control_flow()))
-            brw_NOP(p);
+            append_NOP();
 
-         brw_WHILE(p);
+         const unsigned header_idx = loop_stack.back();
+         loop_stack.pop_back();
+
+         // fprintf(stderr, "setting %d for idx=%d\n", header_idx, (int)gen_insts.size());
+
+         gen_inst *while_inst = append(inst->opcode);
+         while_inst->src[0].file = GEN_IMM;
+         while_inst->src[0].type = GEN_TYPE_D;
+         while_inst->src[0].imm = header_idx;
+
          loop_count++;
          break;
+      }
 
       case SHADER_OPCODE_RCP:
       case SHADER_OPCODE_RSQ:
@@ -952,27 +1438,29 @@ brw_generator_gen::generate_code(const brw_shader &s,
       case SHADER_OPCODE_SIN:
       case SHADER_OPCODE_COS:
          assert(inst->conditional_mod == BRW_CONDITIONAL_NONE);
-         gfx6_math(p, dst, brw_math_function(inst->opcode),
-                   src[0], retype(brw_null_reg(), src[0].type));
+         generate_math(dst, src[0], retype(brw_null_reg(), src[0].type),
+                       gen_math_func_for_opcode(inst->opcode));
 	 break;
+
       case SHADER_OPCODE_INT_QUOTIENT:
       case SHADER_OPCODE_INT_REMAINDER:
       case SHADER_OPCODE_POW:
          assert(devinfo->verx10 < 125);
          assert(inst->conditional_mod == BRW_CONDITIONAL_NONE);
          assert(inst->opcode == SHADER_OPCODE_POW || inst->exec_size == 8);
-         gfx6_math(p, dst, brw_math_function(inst->opcode), src[0], src[1]);
+         generate_math(dst, src[0], src[1], gen_math_func_for_opcode(inst->opcode));
 	 break;
+
       case FS_OPCODE_PIXEL_X:
          assert(src[0].type == BRW_TYPE_UW);
          assert(src[1].type == BRW_TYPE_UW);
          src[0].subnr = 0 * brw_type_size_bytes(src[0].type);
          if (src[1].file == IMM) {
             assert(src[1].ud == 0);
-            brw_MOV(p, dst, stride(src[0], 8, 4, 1));
+            append_MOV(dst, stride(src[0], 8, 4, 1));
          } else {
             /* Coarse pixel case */
-            brw_ADD(p, dst, stride(src[0], 8, 4, 1), src[1]);
+            append(BRW_OPCODE_ADD, dst, stride(src[0], 8, 4, 1), src[1]);
          }
          break;
       case FS_OPCODE_PIXEL_Y:
@@ -981,10 +1469,10 @@ brw_generator_gen::generate_code(const brw_shader &s,
          src[0].subnr = 4 * brw_type_size_bytes(src[0].type);
          if (src[1].file == IMM) {
             assert(src[1].ud == 0);
-            brw_MOV(p, dst, stride(src[0], 8, 4, 1));
+            append_MOV(dst, stride(src[0], 8, 4, 1));
          } else {
             /* Coarse pixel case */
-            brw_ADD(p, dst, stride(src[0], 8, 4, 1), src[1]);
+            append(BRW_OPCODE_ADD, dst, stride(src[0], 8, 4, 1), src[1]);
          }
          break;
 
@@ -1022,23 +1510,35 @@ brw_generator_gen::generate_code(const brw_shader &s,
          generate_mov_indirect(inst, dst, src[0], src[1]);
          break;
 
-      case SHADER_OPCODE_MOV_RELOC_IMM:
+      case SHADER_OPCODE_MOV_RELOC_IMM: {
          assert(src[0].file == IMM);
          assert(src[1].file == IMM);
-         brw_MOV_reloc_imm(p, dst, dst.type, src[0].ud, src[1].ud);
+
+         append_reloc({
+            .id = src[0].ud,
+            .type = INTEL_SHADER_RELOC_TYPE_MOV_IMM,
+            .offset = 16u * (unsigned)gen_insts.size(),
+            .delta = src[1].ud,
+         });
+
+         /* A default value for constants that will be patched at run-time.
+          * We pick an arbitrary value that prevents instruction compaction.
+          */
+         const unsigned DEFAULT_PATCH_IMM = 0x4a7cc037;
+         append_MOV(dst, retype(brw_imm_ud(DEFAULT_PATCH_IMM), dst.type));
+
          break;
+      }
 
       case BRW_OPCODE_HALT:
-         /* This HALT will be patched by brw_set_uip_jip(). */
+         /* The UIP and JIP will be filled later. */
          this->needs_final_halt = true;
-         brw_HALT(p);
+         append(inst->opcode);
          break;
 
       case FS_OPCODE_SCHEDULING_FENCE:
          if (inst->sources == 0 && swsb.regdist == 0 &&
                                    swsb.mode == TGL_SBID_NULL) {
-            if (unlikely(annotate))
-               disasm_info->use_tail = true;
             break;
          }
 
@@ -1048,14 +1548,14 @@ brw_generator_gen::generate_code(const brw_shader &s,
              * scoreboard algorithm already injected other SYNCs before this
              * instruction.
              */
-            brw_SYNC(p, TGL_SYNC_NOP);
+            append_SYNC(GEN_SYNC_NOP);
          } else {
             for (unsigned i = 0; i < inst->sources; i++) {
                /* Emit a MOV to force a stall until the instruction producing the
                 * registers finishes.
                 */
-               brw_MOV(p, retype(brw_null_reg(), BRW_TYPE_UW),
-                       retype(src[i], BRW_TYPE_UW));
+               append(BRW_OPCODE_MOV, retype(brw_null_reg(), BRW_TYPE_UW),
+                                      retype(src[i], BRW_TYPE_UW));
             }
 
             if (inst->sources > 1)
@@ -1073,36 +1573,43 @@ brw_generator_gen::generate_code(const brw_shader &s,
       case FS_OPCODE_LOAD_LIVE_CHANNELS: {
          assert(inst->force_writemask_all && inst->group == 0);
          assert(inst->dst.file == BAD_FILE);
-         brw_set_default_exec_size(p, BRW_EXECUTE_1);
-         brw_set_default_swsb(p, tgl_swsb_dst_dep(swsb, 1));
-         brw_MOV(p, retype(brw_flag_subreg(inst->flag_subreg), BRW_TYPE_UD),
-                 retype(brw_mask_reg(0), BRW_TYPE_UD));
+         current_state()->exec_size = 1;
+         current_state()->swsb = to_gen(tgl_swsb_dst_dep(swsb, 1));
+         append(BRW_OPCODE_MOV,
+                retype(brw_flag_subreg(inst->flag_subreg), BRW_TYPE_UD),
+                retype(brw_mask_reg(0), BRW_TYPE_UD));
          /* Reading certain ARF registers (like 'ce', the mask register) on
           * Gfx12+ requires requires a dependency on all pipes on the read
           * instruction and the next instructions
           */
          if (devinfo->ver >= 12)
-            brw_SYNC(p, TGL_SYNC_NOP);
+            append_SYNC(GEN_SYNC_NOP);
          break;
       }
       case SHADER_OPCODE_BROADCAST:
-         assert(inst->force_writemask_all);
-         brw_broadcast(p, dst, src[0], src[1]);
+         assert(current_state()->align16 == false);
+         generate_broadcast(dst, src[0], src[1]);
          break;
 
       case SHADER_OPCODE_SHUFFLE:
          generate_shuffle(inst, dst, src[0], src[1]);
          break;
 
-      case SHADER_OPCODE_SEL_EXEC:
+      case SHADER_OPCODE_SEL_EXEC: {
          assert(inst->force_writemask_all);
          assert(devinfo->has_64bit_float || brw_type_size_bytes(dst.type) <= 4);
-         brw_set_default_mask_control(p, BRW_MASK_DISABLE);
-         brw_MOV(p, dst, src[1]);
-         brw_set_default_mask_control(p, BRW_MASK_ENABLE);
-         brw_set_default_swsb(p, tgl_swsb_null());
-         brw_MOV(p, dst, src[0]);
+
+         gen_inst *gen;
+
+         gen = append_MOV(dst, src[1]);
+         gen->no_mask = true;
+
+         gen = append_MOV(dst, src[0]);
+         gen->no_mask = false;
+         gen->swsb = to_gen(tgl_swsb_null());
+
          break;
+      }
 
       case SHADER_OPCODE_QUAD_SWIZZLE:
          assert(src[1].file == IMM);
@@ -1139,7 +1646,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
          struct brw_reg strided = stride(suboffset(src[0], component * s),
                                          vstride, width, 0);
-         brw_MOV(p, dst, strided);
+         append_MOV(dst, strided);
          break;
       }
 
@@ -1147,10 +1654,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
          /* This is the place where the final HALT needs to be inserted if
           * we've emitted any discards.  If not, this will emit no code.
           */
-         if (!this->needs_final_halt) {
-            disasm_info->use_tail = true;
+         if (!this->needs_final_halt)
             break;
-         }
 
          /* HALT temporarily disables channels, and the same instruction
           * is used to re-enable them: once all channels are
@@ -1160,8 +1665,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
           * sure all channels get HALTed, so that this last HALT will re-enable
           * them again.
           */
-         final_halt_offset = p->next_insn_offset;
-         brw_HALT(p);
+         final_halt_idx = gen_insts.size();
+         append(BRW_OPCODE_HALT);
 
          if (devinfo->ver >= 12) {
             /* This works around synchronization issues consequence of the
@@ -1198,7 +1703,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
              * operations had to be waited on at roughly this point of the
              * program regardless.
              */
-            brw_SYNC(p, TGL_SYNC_ALLWR);
+            append_SYNC(GEN_SYNC_ALLWR);
          }
          break;
 
@@ -1215,30 +1720,31 @@ brw_generator_gen::generate_code(const brw_shader &s,
           */
          enum brw_rnd_mode mode =
             (enum brw_rnd_mode) (src[0].d << BRW_CR0_RND_MODE_SHIFT);
-         brw_float_controls_mode(p, mode, BRW_CR0_RND_MODE_MASK);
-      }
+         generate_float_controls_mode(mode, BRW_CR0_RND_MODE_MASK);
          break;
+      }
 
       case SHADER_OPCODE_FLOAT_CONTROL_MODE:
          assert(src[0].file == IMM);
          assert(src[1].file == IMM);
-         brw_float_controls_mode(p, src[0].d, src[1].d);
+         generate_float_controls_mode(src[0].d, src[1].d);
          break;
 
       case SHADER_OPCODE_READ_ARCH_REG:
          if (devinfo->ver >= 12) {
+            auto state = current_state();
             /* There is a SWSB restriction that requires that any time sr0 is
              * accessed both the instruction doing the access and the next one
              * have SWSB set to RegDist(1).
              */
-            if (brw_get_default_swsb(p).mode != TGL_SBID_NULL)
-               brw_SYNC(p, TGL_SYNC_NOP);
-            brw_set_default_swsb(p, tgl_swsb_regdist(1));
-            brw_MOV(p, dst, src[0]);
-            brw_set_default_swsb(p, tgl_swsb_regdist(1));
-            brw_AND(p, dst, dst, brw_imm_ud(0xffffffff));
+            if (state->swsb.mode != GEN_SBID_NULL)
+               append_SYNC(GEN_SYNC_NOP);
+            state->swsb = to_gen(tgl_swsb_regdist(1));
+            append(BRW_OPCODE_MOV, dst, src[0]);
+            state->swsb = to_gen(tgl_swsb_regdist(1));
+            append(BRW_OPCODE_AND, dst, dst, brw_imm_ud(0xffffffff));
          } else {
-            brw_MOV(p, dst, src[0]);
+            append(BRW_OPCODE_MOV, dst, src[0]);
          }
          break;
 
@@ -1254,53 +1760,53 @@ brw_generator_gen::generate_code(const brw_shader &s,
          continue;
 
       if (inst->conditional_mod) {
-         assert(p->next_insn_offset == last_insn_offset + 16 ||
+         // TODO!
+         assert(last_insn_offset == gen_insts.size() - 1 ||
                 !"conditional_mod for IR "
                  "emitting more than 1 instruction");
-
-         brw_eu_inst *last = &p->store[last_insn_offset / 16];
-
-         if (inst->conditional_mod) {
-            if (inst->opcode != BRW_OPCODE_BFN) {
-               brw_eu_inst_set_cond_modifier(p->devinfo, last, inst->conditional_mod);
-            } else {
-               unsigned cc;
-
-               switch (inst->conditional_mod) {
-               case BRW_CONDITIONAL_NONE:
-                  cc = 0;
-                  break;
-               case BRW_CONDITIONAL_Z:
-                  cc = 1;
-                  break;
-               case BRW_CONDITIONAL_G:
-                  cc = 2;
-                  break;
-               case BRW_CONDITIONAL_L:
-                  cc = 3;
-                  break;
-               default:
-                  UNREACHABLE("Invalid cmod for BFN.");
-               }
-
-               brw_eu_inst_set_boolean_func_cond_modifier(p->devinfo, last, cc);
-            }
-         }
+         gen_inst *gen = gen_insts.back();
+         gen->cmod = (gen_condition)inst->conditional_mod;
       }
 
       /* When enabled, insert sync NOP after every instruction and make sure
        * that current instruction depends on the previous instruction.
        */
       if (INTEL_DEBUG(DEBUG_SWSB_STALL) && devinfo->ver >= 12) {
-         brw_set_default_swsb(p, tgl_swsb_regdist(1));
-         brw_SYNC(p, TGL_SYNC_NOP);
+         current_state()->swsb = to_gen(tgl_swsb_regdist(1));
+         // TODO: Sync with SBID defined above if any!
+         append_SYNC(GEN_SYNC_NOP);
       }
    }
 
-   brw_set_uip_jip(p, start_offset, final_halt_offset);
+   // TODO: Various normalizations.  See if can move them elsewhere.
+   for (auto *gen : gen_insts) {
+      if (!gen->align16 && gen->exec_size == 1) {
+         if (gen->src[0].file != GEN_BAD_FILE && gen->src[0].region.width == 1)
+            gen->src[0].region = { 0, 1, 0 };
+         if (gen->src[1].file != GEN_BAD_FILE && gen->src[1].region.width == 1)
+            gen->src[1].region = { 0, 1, 0 };
 
-   /* end of program sentinel */
-   disasm_new_inst_group(disasm_info, p->next_insn_offset);
+      }
+      if ((gen->dst.file == GEN_GRF || gen->dst.file == GEN_ARF) &&
+           gen->dst.region.hstride == 0) {
+         gen->dst.region.hstride = 1;
+      }
+   }
+
+   /* Translate any pre-filled IMM branch sources from absolute indices
+    * into the relative byte offsets.
+    */
+   for (int idx = 0; idx < (int)gen_insts.size(); idx++) {
+      gen_inst *gen = gen_insts[idx];
+      const int jip_src = gen_inst_jip_src_index(gen->opcode);
+      if (jip_src >= 0 && gen->src[jip_src].file == GEN_IMM)
+         gen->src[jip_src].imm = 16 * ((int32_t)gen->src[jip_src].imm - idx);
+      const int uip_src = gen_inst_uip_src_index(gen->opcode);
+      if (uip_src >= 0 && gen->src[uip_src].file == GEN_IMM)
+         gen->src[uip_src].imm = 16 * ((int32_t)gen->src[uip_src].imm - idx);
+   }
+
+   gen_finish_structured_cf(gen_insts.data(), gen_insts.size(), final_halt_idx);
 
    /* `send_count` explicitly does not include spills or fills, as we'd
     * like to use it as a metric for intentional memory access or other
@@ -1311,19 +1817,70 @@ brw_generator_gen::generate_code(const brw_shader &s,
    send_count -= shader_stats.spill_count;
    send_count -= shader_stats.fill_count;
 
+   bool needs_validation = debug_flag;
 #ifndef NDEBUG
-   bool validated =
-#else
-   if (unlikely(debug_flag))
+   needs_validation = true;
 #endif
-      brw_validate_instructions(&compiler->isa, p->store,
-                                start_offset,
-                                p->next_insn_offset,
-                                disasm_info);
 
-   int before_size = p->next_insn_offset - start_offset;
-   brw_compact_instructions(p, start_offset, disasm_info);
-   int after_size = p->next_insn_offset - start_offset;
+   if (unlikely(needs_validation)) {
+      gen_validate_params val_params = {
+         .devinfo   = devinfo,
+         // TODO: create gen_inst_ptr so const doesn't look bad in the api?
+         .insts = (const gen_inst **)gen_insts.data(),
+         .num_insts = (int)gen_insts.size(),
+         .mem_ctx   = params->mem_ctx,
+      };
+
+      bool validated = gen_validate(&val_params);
+      if (!validated) {
+         if (!debug_flag) {
+            fprintf(stderr,
+                  "Validation failed. Rerun with INTEL_DEBUG=shaders to get more information.\n");
+         } else {
+            gen_print_params print_params = {
+               .devinfo = devinfo,
+               .insts = gen_insts.data(),
+               .num_insts = (int)gen_insts.size(),
+               .errors = val_params.errors,
+               .num_errors = val_params.num_errors,
+#ifndef NDEBUG
+               .annotations = annotations.data(),
+#endif
+            };
+            gen_print(&print_params);
+            fprintf(stderr, "Validation failed. See inline errors above.\n");
+         }
+      }
+
+      assert(validated);
+   }
+
+   /* Ensure shaders start at 64 byte boundary. */
+   int start_offset = allocate_output(gen_insts.size() * 16, 64);
+
+   gen_raw_inst *start = (gen_raw_inst *)(output + start_offset);
+
+   gen_encode_params enc_params = {
+      .devinfo = devinfo,
+
+      /* Will explicitly call validation later. */
+      .skip_validation = true,
+
+      // TODO: create gen_inst_ptr so const doesn't look bad in the api?
+      .insts = (const gen_inst **)gen_insts.data(),
+      .num_insts = (int)gen_insts.size(),
+
+      .mem_ctx = mem_ctx,
+      .raw_bytes = (void *)start,
+      .raw_bytes_size = (int)gen_insts.size() * 16,
+   };
+
+   const int before_size = enc_params.raw_bytes_size;
+
+   bool encoded = gen_encode(&enc_params);
+   assert(encoded);
+
+   const int after_size = enc_params.raw_bytes_size;
 
    bool dump_shader_bin = brw_should_dump_shader_bin();
    unsigned char blake3[BLAKE3_KEY_LEN + 1];
@@ -1332,15 +1889,15 @@ brw_generator_gen::generate_code(const brw_shader &s,
    auto override_path = debug_get_option_shader_bin_override_path();
    if (unlikely(debug_flag || dump_shader_bin || override_path != NULL ||
                 params->archiver)) {
-      _mesa_blake3_compute(p->store + start_offset / sizeof(brw_eu_inst),
-                         after_size, blake3);
+      _mesa_blake3_compute(enc_params.raw_bytes, after_size, blake3);
       _mesa_blake3_format(blake3buf, blake3);
    }
 
    if (unlikely(dump_shader_bin))
-      brw_dump_shader_bin(p->store, start_offset, p->next_insn_offset,
-                          blake3buf);
+      brw_dump_shader_bin(enc_params.raw_bytes, 0, after_size, blake3buf);
 
+   // TODO: Override!
+#if 0
    if (unlikely(override_path != NULL &&
                 brw_try_override_assembly(p, start_offset, override_path,
                                           blake3buf))) {
@@ -1355,6 +1912,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
       ralloc_free(disasm_info);
       return start_offset;
    }
+#endif
 
    if (unlikely(debug_flag || params->archiver)) {
       FILE *files[2] = { NULL, NULL };
@@ -1365,7 +1923,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
       if (params->archiver) {
          const char *filename =
-            ralloc_asprintf(mem_ctx, "ASM%d/0", dispatch_width);
+            ralloc_asprintf(mem_ctx, "GEN%d/0", dispatch_width);
          files[1] = debug_archiver_start_file(params->archiver, filename);
       }
 
@@ -1392,8 +1950,18 @@ brw_generator_gen::generate_code(const brw_shader &s,
                  shader_stats.non_ssa_registers_after_nir,
                  before_size, after_size,
                  100.0f * (before_size - after_size) / before_size);
-         dump_assembly(p->store, start_offset, p->next_insn_offset,
-                       disasm_info, perf.block_latency, files[i]);
+
+         // TODO: Include perf.block_latency in print out.
+         gen_print_params print_params = {
+            .devinfo = devinfo,
+            .fp = files[i],
+            .insts = gen_insts.data(),
+            .num_insts = (int)gen_insts.size(),
+#ifndef NDEBUG
+            .annotations = annotations.data(),
+#endif
+         };
+         gen_print(&print_params);
       }
 
       if (params->archiver) {
@@ -1401,14 +1969,6 @@ brw_generator_gen::generate_code(const brw_shader &s,
       }
    }
 
-   ralloc_free(disasm_info);
-
-#ifndef NDEBUG
-   if (!validated && !debug_flag) {
-      fprintf(stderr,
-            "Validation failed. Rerun with INTEL_DEBUG=shaders to get more information.\n");
-   }
-#endif
    brw_shader_debug_log(compiler, params->log_data,
                         "%s SIMD%d shader: %d inst, %d loops, %u cycles, "
                         "%d:%d spills:fills, %u sends, "
@@ -1425,7 +1985,6 @@ brw_generator_gen::generate_code(const brw_shader &s,
                         shader_stats.scheduler_mode,
                         shader_stats.promoted_constants,
                         before_size, after_size);
-   assert(validated);
 
    if (stats) {
       stats->dispatch_width = dispatch_width;
@@ -1458,6 +2017,9 @@ brw_generator_gen::generate_code(const brw_shader &s,
          stats->workgroup_memory_size = 0;
    }
 
+   gen_insts.clear();
+
+   out_size = after_size;
    return start_offset;
 }
 
@@ -1465,9 +2027,10 @@ void
 brw_generator_gen::add_const_data(void *data, unsigned size)
 {
    assert(prog_data->const_data_size == 0);
+
    if (size > 0) {
       prog_data->const_data_size = size;
-      prog_data->const_data_offset = brw_append_data(p, data, size, 32);
+      prog_data->const_data_offset = append_output(data, size, 32);
    }
 }
 
@@ -1478,13 +2041,16 @@ brw_generator_gen::add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt)
    struct brw_bs_prog_data *bs_prog_data = brw_bs_prog_data(prog_data);
    if (num_resume_shaders > 0) {
       bs_prog_data->resume_sbt_offset =
-         brw_append_data(p, sbt, num_resume_shaders * sizeof(uint64_t), 32);
+         append_output(sbt, num_resume_shaders * sizeof(uint64_t), 32);
       for (unsigned i = 0; i < num_resume_shaders; i++) {
          size_t offset = bs_prog_data->resume_sbt_offset + i * sizeof(*sbt);
          assert(offset <= UINT32_MAX);
-         brw_add_reloc(p, INTEL_SHADER_RELOC_SHADER_START_OFFSET,
-                       INTEL_SHADER_RELOC_TYPE_U32,
-                       (uint32_t)offset, (uint32_t)sbt[i]);
+         append_reloc({
+            .id = INTEL_SHADER_RELOC_SHADER_START_OFFSET,
+            .type = INTEL_SHADER_RELOC_TYPE_U32,
+            .offset = (uint32_t)offset,
+            .delta = (uint32_t)sbt[i],
+         });
       }
    }
 }
@@ -1492,185 +2058,153 @@ brw_generator_gen::add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt)
 const unsigned *
 brw_generator_gen::get_assembly()
 {
-   prog_data->relocs = brw_get_shader_relocs(p, &prog_data->num_relocs);
+   prog_data->relocs = relocs;
+   prog_data->num_relocs = num_relocs;
 
-   return brw_get_program(p, &prog_data->program_size);
+   // TODO: Needed?
+   /* Align final size with instruction size. */
+   allocate_output(0, 16);
+   assert(output_size % 16 == 0);
+
+   prog_data->program_size = output_size;
+
+   return (unsigned *)output;
 }
 
-/* After program generation, go back and update the UIP and JIP of
- * BREAK, CONT, ENDIF and HALT instructions to their correct locations.
- */
-void
-brw_set_uip_jip(struct brw_codegen *p, int start_offset, int final_halt_offset)
+gen_inst *
+brw_generator_gen::make_empty()
 {
-   const struct intel_device_info *devinfo = p->devinfo;
-   const int end_offset = p->next_insn_offset;
-   brw_eu_inst *store = p->store;
+   gen_inst *gen = linear_zalloc(insts_store, gen_inst);
+   return gen;
+}
 
-   struct branch_info {
-      enum opcode opcode;
-      int offset;
+gen_inst *
+brw_generator_gen::make(gen_opcode op)
+{
+   gen_inst *gen = make_empty();
 
-      /* For loop headers. */
-      int loop_end_offset;
-   };
+   const auto state = current_state();
+   gen->exec_size      = state->exec_size;
+   gen->chan_offset    = state->chan_offset;
+   gen->flag_nr        = state->flag_nr;
+   gen->flag_subnr     = state->flag_subnr;
+   gen->pred_control   = state->pred_control;
+   gen->pred_inv       = state->pred_inv;
+   gen->no_mask        = state->no_mask;
+   gen->saturate       = state->saturate;
+   gen->align16        = state->align16;
+   gen->acc_wr_control = state->acc_wr_control;
+   gen->swsb           = state->swsb;
 
-   /* Collect information about the control flow instructions and any
-    * instruction that are loop headers.  There might be multiple entries
-    * for instructions that act as loop header for multiple loops and/or that
-    * are control flow instruction themselves (e.g. IF as the loop header).
-    */
-   std::vector<branch_info> infos;
-   for (int offset = start_offset; offset < end_offset; offset += 16) {
-      brw_eu_inst *insn = store + (offset / 16);
-      assert(brw_eu_inst_cmpt_control(devinfo, insn) == 0);
+   gen->opcode = op;
 
-      const enum opcode opcode = brw_eu_inst_opcode(p->isa, insn);
-      switch (opcode) {
-      case BRW_OPCODE_IF:
-      case BRW_OPCODE_ELSE:
-      case BRW_OPCODE_ENDIF:
-      case BRW_OPCODE_HALT:
-      case BRW_OPCODE_BREAK:
-      case BRW_OPCODE_CONTINUE:
-      case BRW_OPCODE_WHILE:
-         infos.push_back({
-            .opcode = opcode,
-            .offset = offset,
-         });
-         if (opcode == BRW_OPCODE_WHILE) {
-            /* Also add an entry for the loop header. */
-            const int jip = brw_eu_inst_jip(devinfo, insn);
-            assert(jip < 0);
-            infos.push_back({
-               /* Use NOP to indicate this is a loop header entry. */
-               .opcode = BRW_OPCODE_NOP,
-               .offset = offset + jip,
-               .loop_end_offset = offset,
-            });
-         }
-         break;
+   return gen;
+}
 
-      default:
-         /* Nothing to do. */
-         break;
-      }
+gen_inst *
+brw_generator_gen::append(gen_inst *gen)
+{
+   gen_insts.push_back(gen);
+#ifndef NDEBUG
+   annotations.push_back(next_annotation);
+#endif
+   return gen;
+}
+
+gen_inst *
+brw_generator_gen::append(enum opcode opcode)
+{
+   return append(make(to_gen(opcode)));
+}
+
+gen_inst *
+brw_generator_gen::append(enum opcode opcode, brw_reg dst,
+                          brw_reg src0)
+{
+   gen_inst *gen = append(opcode);
+   gen->dst    = to_gen(dst,  gen->align16);
+   gen->src[0] = to_gen(src0, gen->align16);
+   return gen;
+}
+
+gen_inst *
+brw_generator_gen::append(enum opcode opcode, brw_reg dst,
+                          brw_reg src0, brw_reg src1)
+{
+   gen_inst *gen = append(opcode);
+   gen->dst    = to_gen(dst,  gen->align16);
+   gen->src[0] = to_gen(src0, gen->align16);
+   gen->src[1] = to_gen(src1, gen->align16);
+   return gen;
+}
+
+gen_inst *
+brw_generator_gen::append(enum opcode opcode, brw_reg dst,
+                          brw_reg src0, brw_reg src1, brw_reg src2)
+{
+   gen_inst *gen = append(opcode);
+   gen->dst    = to_gen(dst,  gen->align16);
+   gen->src[0] = to_gen(src0, gen->align16);
+   gen->src[1] = to_gen(src1, gen->align16);
+   gen->src[2] = to_gen(src2, gen->align16);
+   return gen;
+}
+
+gen_inst *
+brw_generator_gen::append_SYNC(gen_sync_func func)
+{
+   gen_inst *gen = make(GEN_OP_SYNC);
+   gen->dst      = gen_null();
+   gen->src[0]   = gen_null();
+
+   gen->sync.func = func;
+
+   return append(gen);
+}
+
+gen_inst *
+brw_generator_gen::append_NOP()
+{
+   gen_inst *nop = make_empty();
+   nop->opcode = GEN_OP_NOP;
+   nop->exec_size = 1;
+   return append(nop);
+}
+
+int
+brw_generator_gen::allocate_output(unsigned size, unsigned alignment)
+{
+   assert(util_is_power_of_two_nonzero(alignment));
+
+   unsigned padding = 0;
+   if (output_size && (output_size % alignment != 0)) {
+      padding = alignment - output_size % alignment;
    }
 
-   /* Sort in scope order. */
-   std::sort(infos.begin(), infos.end(), [](const auto &a, const auto &b) {
-      if (a.offset != b.offset)
-         return a.offset < b.offset;
-      /* Note the flipped comparison: want to see the largest scope first,
-       * since it contains the other.
-       */
-      return a.loop_end_offset > b.loop_end_offset;
-   });
+   const unsigned new_output_size = output_size + padding + size;
+   output = (uint8_t *)reralloc_array_size(mem_ctx, output, 1, new_output_size);
+   assert(output);
 
-   struct scope {
-      int end_offset;
-
-      /* End of current loop if exists. */
-      int loop_end_offset;
-   };
-
-   std::vector<scope> scopes;
-   scopes.push_back({-1, -1});
-
-   /* Walk backwards keeping track of the scopes.  This make easy to
-    * get the innermost end of scope and the innermost end of loop.
+   /* Memset any padding due to alignment to 0.  We don't want to be hashing
+    * or caching a bunch of random bits we got from a memory allocation.
     */
-   for (int i = infos.size() - 1; i >= 0; i--) {
-      const branch_info &info = infos[i];
+   memset(output + output_size, 0, padding);
 
-      brw_eu_inst *insn = store + (info.offset / 16);
+   output_size = new_output_size;
+   return new_output_size - size;
+}
 
-      switch (info.opcode) {
-      case BRW_OPCODE_NOP:
-      case BRW_OPCODE_IF:
-         /* Pop the scope.  NOP here is a stand in for loop headers. */
-         scopes.pop_back();
-         break;
+int
+brw_generator_gen::append_output(void *data, unsigned size, unsigned alignment)
+{
+   int offset = allocate_output(size, alignment);
+   memcpy(output + offset, data, size);
+   return offset;
+}
 
-      case BRW_OPCODE_ELSE:
-         /* For instructions before the ELSE in the conditional (i.e. the
-          * then-part of the loop), the scope ends here.
-          */
-         scopes.back().end_offset = info.offset;
-         break;
-
-      case BRW_OPCODE_ENDIF: {
-         const int innermost_end_offset = scopes.back().end_offset;
-         int jip_offset;
-
-         if (innermost_end_offset != -1)
-            jip_offset = innermost_end_offset;
-         else if (final_halt_offset != -1)
-            jip_offset = final_halt_offset + 16;
-         else
-            jip_offset = info.offset + 16;
-
-         brw_eu_inst_set_jip(devinfo, insn, jip_offset - info.offset);
-
-         scopes.push_back({
-            .end_offset      = info.offset,
-            .loop_end_offset = scopes.back().loop_end_offset,
-         });
-         break;
-      }
-
-      case BRW_OPCODE_WHILE:
-         scopes.push_back({
-            .end_offset      = info.offset,
-            .loop_end_offset = info.offset,
-         });
-         break;
-
-      case BRW_OPCODE_BREAK:
-      case BRW_OPCODE_CONTINUE: {
-         const int innermost_end_offset = scopes.back().end_offset;
-         brw_eu_inst_set_jip(devinfo, insn, innermost_end_offset - info.offset);
-
-         const int loop_end_offset = scopes.back().loop_end_offset;
-         assert(loop_end_offset != -1);
-         assert(loop_end_offset > info.offset);
-         brw_eu_inst_set_uip(devinfo, insn, loop_end_offset - info.offset);
-         break;
-      }
-
-      case BRW_OPCODE_HALT: {
-         /* From the Sandy Bridge PRM (volume 4, part 2, section 8.3.19):
-          *
-          *    "In case of the halt instruction not inside any conditional
-          *     code block, the value of <JIP> and <UIP> should be the
-          *     same. In case of the halt instruction inside conditional code
-          *     block, the <UIP> should be the end of the program, and the
-          *     <JIP> should be end of the most inner conditional code block."
-          */
-         const int innermost_end_offset = scopes.back().end_offset;
-
-         /* If present, use the final HALT to infer the "end of the program".
-          *
-          * See also SHADER_OPCODE_HALT_TARGET.
-          */
-         if (final_halt_offset != -1) {
-            if (final_halt_offset == info.offset)
-               assert(innermost_end_offset == -1);
-
-            const int uip_offset = final_halt_offset + 16;
-            brw_eu_inst_set_uip(devinfo, insn, uip_offset - info.offset);
-         }
-
-         if (innermost_end_offset != -1)
-            brw_eu_inst_set_jip(devinfo, insn, innermost_end_offset - info.offset);
-         else
-            brw_eu_inst_set_jip(devinfo, insn, brw_eu_inst_uip(devinfo, insn));
-         break;
-      }
-
-      default:
-         /* Nothing to do. */
-         break;
-      }
-   }
+void
+brw_generator_gen::append_reloc(const intel_shader_reloc &r)
+{
+   relocs = reralloc(mem_ctx, relocs, intel_shader_reloc, num_relocs + 1);
+   relocs[num_relocs++] = r;
 }
