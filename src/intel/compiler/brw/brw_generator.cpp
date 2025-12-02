@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "brw_disasm.h"
 #include "brw_eu.h"
 #include "brw_disasm_info.h"
 #include "brw_shader.h"
@@ -20,6 +21,94 @@
 #include "dev/intel_debug.h"
 #include "util/mesa-blake3.h"
 #include "util/half_float.h"
+
+// TODO: Flip the default.
+DEBUG_GET_ONCE_BOOL_OPTION(check_gen_module, "BRW_GEN", true);
+
+static inline bool check_gen() {
+   return debug_get_option_check_gen_module();
+}
+
+static void
+print_raw(FILE *fp, const void *raw)
+{
+   fprintf(fp, "(msb)  ");
+   for (int i = 127; i >= 0; i--) {
+      if (i && (i+1) % 16 == 0)
+         fprintf(fp, "'");
+      fprintf(fp, "%lu", brw_eu_inst_bits((brw_eu_inst *)raw, i, i));
+   }
+   fprintf(fp, "  (lsb)\n");
+}
+
+bool
+diff_insts(const struct brw_isa_info *isa,
+           const void *original,
+           const void *encoded,
+           int position)
+{
+   if (memcmp(original, encoded, sizeof(gen_raw_inst)) == 0)
+      return false;
+
+   char buffer[8192];
+   FILE *fp = fmemopen(buffer, sizeof(buffer), "w");
+
+   fprintf(fp, "\n==== MISMATCH AT POISITION %u ====\n", position);
+
+   fprintf(fp, "ORIGINAL: ");
+   brw_disassemble_inst(fp, isa, (brw_eu_inst *)original, false, 0, NULL);
+   fprintf(fp, "\n");
+
+   fprintf(fp, "ENCODED:  ");
+   brw_disassemble_inst(fp, isa, (brw_eu_inst *)encoded, false, 0, NULL);
+   fprintf(fp, "\n");
+
+   fprintf(fp, "\n------------------------------\n\n");
+
+   fprintf(fp, "                       "
+           "/127   \\/   112\\ /111   \\/103 96\\ /95  88\\/87  80\\ "
+           "/79  72\\/71  64\\ /63  56\\/55  48\\ /47  40\\/39  32\\ "
+           "/31  24\\/23  16\\ /15   8\\/7    0\\"
+           "\n");
+   fprintf(fp, "ORIGINAL BITS: ");
+   print_raw(fp, original);
+
+   fprintf(fp, "ENCODED BITS:  ");
+   print_raw(fp, encoded);
+
+   fprintf(fp, "MARKERS:       ");
+   fprintf(fp, "       ");
+   for (int i = 127; i >= 0; i--) {
+      if (i && (i+1) % 16 == 0)
+         fprintf(fp, " ");
+      if (brw_eu_inst_bits((brw_eu_inst *)original, i, i) != brw_eu_inst_bits((brw_eu_inst*)encoded, i, i))
+         fprintf(fp, "^");
+      else
+         fprintf(fp, " ");
+   }
+   fprintf(fp, "\n");
+
+   fprintf(fp, "\n------------------------------\n\n");
+
+   fprintf(fp, "MISMATCH BITS:");
+   unsigned count = 0;
+   for (int i = 127; i >= 0; i--) {
+      if (brw_eu_inst_bits((brw_eu_inst*)original, i, i) != brw_eu_inst_bits((brw_eu_inst*)encoded, i, i)) {
+         fprintf(fp, " %d", i);
+         count++;
+      }
+   }
+   fprintf(fp, " (count: %u)\n", count);
+
+   fprintf(fp, "\n==== MISMATCH END ====\n\n");
+
+   fclose(fp);
+
+   fputs(buffer, stderr);
+   fflush(stderr);
+
+   return true;
+}
 
 static uint32_t
 brw_math_function(enum opcode op)
@@ -76,6 +165,12 @@ normalize_brw_reg_for_encoding(brw_reg *reg)
    return brw_reg;
 }
 
+static brw_stage_prog_data *
+clone_prog_data(void *mem_ctx, brw_stage_prog_data *pd)
+{
+   return (brw_stage_prog_data *)ralloc_memdup(mem_ctx, pd, brw_prog_data_size(pd->stage));
+}
+
 brw_generator::brw_generator(const struct brw_compiler *compiler,
                            const struct brw_compile_params *params,
                            struct brw_stage_prog_data *prog_data,
@@ -85,7 +180,8 @@ brw_generator::brw_generator(const struct brw_compiler *compiler,
      devinfo(compiler->devinfo),
      prog_data(prog_data), dispatch_width(0),
      debug_flag(false),
-     shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx)
+     shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx),
+     gen(compiler, params, clone_prog_data(mem_ctx, prog_data), stage)
 {
    p = rzalloc(mem_ctx, struct brw_codegen);
    brw_init_codegen(&compiler->isa, p, mem_ctx);
@@ -652,6 +748,9 @@ brw_generator::enable_debug(const char *shader_name)
 {
    debug_flag = true;
    this->shader_name = shader_name;
+
+   if (check_gen())
+      gen.enable_debug(shader_name);
 }
 
 int
@@ -1328,7 +1427,13 @@ brw_generator::generate_code(const brw_shader &s,
                                 disasm_info);
 
    int before_size = p->next_insn_offset - start_offset;
-   brw_compact_instructions(p, start_offset, disasm_info);
+
+   // TODO(COMPACT): Remove the check_gen() once compact is OK.
+   const bool compact = !INTEL_DEBUG(DEBUG_NO_COMPACTION) && !check_gen();
+
+   if (compact)
+      brw_compact_instructions(p, start_offset, disasm_info);
+
    int after_size = p->next_insn_offset - start_offset;
 
    bool dump_shader_bin = brw_should_dump_shader_bin();
@@ -1464,6 +1569,146 @@ brw_generator::generate_code(const brw_shader &s,
          stats->workgroup_memory_size = 0;
    }
 
+   // DECODE/ENCODE ROUNDTRIP CHECK.  Takes the assembly from the old
+   // generator and use gen_decode/gen_encode, then compare the final result.
+   if (check_gen()) {
+      void *tmp_ctx = ralloc_context(NULL);
+
+      assert(!compact);
+
+      gen_decode_params dec_params = {
+         .devinfo = devinfo,
+         .raw_bytes = (char *)p->store + start_offset,
+         .raw_bytes_size = after_size,
+         .mem_ctx = tmp_ctx,
+      };
+
+      if (!gen_decode(&dec_params)) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "COULD NOT DECODE IN ROUNDTRIP TEST\n"
+                 "\n");
+         for (int i = 0; i < dec_params.num_errors; i++)
+            fprintf(stderr, "ERROR: %d %s\n", dec_params.errors[i].index, dec_params.errors[i].msg);
+         abort();
+      }
+
+      assert(!compact);
+
+      gen_encode_params enc_params = {
+         .devinfo = devinfo,
+         .compact_all = compact,
+         .insts = (const gen_inst **)dec_params.insts,
+         .num_insts = dec_params.num_insts,
+         .mem_ctx = tmp_ctx,
+         .raw_bytes = ralloc_size(tmp_ctx, after_size > 0 ? after_size : 1),
+         .raw_bytes_size = after_size > 0 ? after_size : 1,
+      };
+
+      if (!gen_encode(&enc_params)) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "COULD NOT ENCODE IN ROUNDTRIP TEST\n"
+                 "\n");
+         for (int i = 0; i < enc_params.num_errors; i++)
+            fprintf(stderr, "ERROR: %d %s\n", enc_params.errors[i].index, enc_params.errors[i].msg);
+         abort();
+      }
+
+      assert(enc_params.raw_bytes_size == after_size);
+
+      auto original = (const brw_eu_inst *) ((char *)p->store + start_offset);
+      auto reencoded = (const brw_eu_inst *) enc_params.raw_bytes;
+
+      if (memcmp(original, reencoded, after_size) != 0) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "DECODE / ENCODE ROUNDTRIP MISMATCH\n"
+                 "\n");
+         for (int i = 0; i < dec_params.num_insts; i++) {
+            if (diff_insts(&compiler->isa, &original[i], &reencoded[i], i)) {
+               fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", i*16);
+               abort();
+            }
+         }
+
+         abort();
+      }
+
+      ralloc_free(tmp_ctx);
+   }
+
+   // GEN GENERATOR CHECK.  Call gen based generator and compare the results.
+   if (check_gen()) {
+      const int old_size = after_size;
+      int gen_size = 0;
+      int gen_start_offset = gen.generate_code(s, stats, gen_size);
+      assert(start_offset == gen_start_offset);
+
+      bool size_mismatch = after_size != old_size;
+      if (size_mismatch) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "GENERATED CODE SIZE MISMATCH\n"
+                 "\n"
+                 "   old=%u     new=%u\n"
+                 "\n",
+                 old_size, gen_size);
+      }
+
+      const int limit = MIN2(old_size, gen_size);
+
+      auto old_code = (const gen_raw_inst *)((char *)p->store + start_offset);
+      auto gen_code = (const gen_raw_inst *)((char *)gen.output + start_offset);
+
+      bool data_mismatch = memcmp(old_code, gen_code, limit) != 0;
+      if (data_mismatch) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "INSTRUCTION MISMATCH\n"
+                 "\n");
+         // TODO(COMPACT): Improve diff logic below to account for compacted
+         // instructions.  See the loop we do in decoder.
+         assert(!compact);
+
+         for (int i = 0; i < limit; i++) {
+            if (diff_insts(&compiler->isa, &old_code[i], &gen_code[i], i)) {
+               fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", i * 16);
+               if (size_mismatch)
+                  break;
+            }
+         }
+      }
+
+      if (size_mismatch || data_mismatch)
+         abort();
+   }
+
    return start_offset;
 }
 
@@ -1474,6 +1719,10 @@ brw_generator::add_const_data(void *data, unsigned size)
    if (size > 0) {
       prog_data->const_data_size = size;
       prog_data->const_data_offset = brw_append_data(p, data, size, 32);
+   }
+
+   if (check_gen()) {
+      gen.add_const_data(data, size);
    }
 }
 
@@ -1493,6 +1742,10 @@ brw_generator::add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt)
                        (uint32_t)offset, (uint32_t)sbt[i]);
       }
    }
+
+   if (check_gen()) {
+      gen.add_resume_sbt(num_resume_shaders, sbt);
+   }
 }
 
 const unsigned *
@@ -1500,7 +1753,16 @@ brw_generator::get_assembly()
 {
    prog_data->relocs = brw_get_shader_relocs(p, &prog_data->num_relocs);
 
-   return brw_get_program(p, &prog_data->program_size);
+   const unsigned *result = brw_get_program(p, &prog_data->program_size);
+
+   // Shader generation is in generate_code(), just do a sanity check now.
+   if (check_gen()) {
+      const unsigned *result_gen = gen.get_assembly();
+      assert(prog_data->program_size == gen.prog_data->program_size);
+      assert(memcmp(result, result_gen, prog_data->program_size) == 0);
+   }
+
+   return result;
 }
 
 void brw_prog_data_init(struct brw_stage_prog_data *prog_data,
