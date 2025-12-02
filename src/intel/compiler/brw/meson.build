@@ -180,7 +180,7 @@ if with_tests
         'test_simd_selection.cpp',
         'test_vf_float_conversions.cpp',
       ),
-      include_directories : [inc_include, inc_src, inc_intel],
+      include_directories : [inc_include, inc_src, inc_intel, inc_intel_compiler],
       cpp_args : ['-Werror=vla'],
       link_with : libisl,
       dependencies : [idep_gtest, idep_nir, idep_mesautil, idep_intel_dev,

@@ -6,6 +6,7 @@
 #pragma once
 
 #include "brw_shader.h"
+#include "brw_generator_gen.h"
 
 /* Translates BRW IR to actual EU assembly code. */
 class brw_generator
@@ -73,6 +74,8 @@ private:
    const char *shader_name;
    mesa_shader_stage stage;
    void *mem_ctx;
+
+   brw_generator_gen gen;
 };
 
 void brw_prog_data_init(struct brw_stage_prog_data *prog_data,

@@ -23,6 +23,8 @@
 #include "brw_eu.h"
 #include "brw_disasm_info.h"
 
+#include "gen/gen.h"
+
 enum brw_hw_instr_format {
    FORMAT_BASIC,
    FORMAT_BASIC_THREE_SRC,
@@ -3143,6 +3145,53 @@ brw_validate_instructions(const struct brw_isa_info *isa,
       valid = valid && v;
 
       src_offset += inst_size;
+   }
+
+   if (valid) {
+      void *tmp_ctx = ralloc_context(NULL);
+
+      gen_decode_params decode = {
+         .devinfo = devinfo,
+         .mem_ctx = tmp_ctx,
+         .raw_bytes = assembly + start_offset,
+         .raw_bytes_size = end_offset - start_offset,
+      };
+
+      bool decoded = gen_decode(&decode);
+      assert(decoded);
+
+      // gen_print(&(gen_print_params) { .devinfo = devinfo,
+      //                                 .insts = decode.insts,
+      //                                 .num_insts = decode.num_insts });
+
+      gen_encode_params encode = {
+         .devinfo = devinfo,
+         .insts = (const gen_inst **)decode.insts,
+         .num_insts = decode.num_insts,
+         .mem_ctx = tmp_ctx,
+      };
+      bool encoded = gen_encode(&encode);
+      assert(encoded);
+
+      assert(encode.raw_bytes_size == end_offset - start_offset);
+      // assert(memcmp(encode.raw_bytes, assembly + start_offset, encode.raw_bytes_size) == 0);
+
+      const brw_eu_inst *a = assembly + start_offset;
+      const brw_eu_inst *b = encode.raw_bytes;
+
+      bool failed = false;
+      for (int i = 0; i < decode.num_insts; i++) {
+
+         if (diff_insts(isa, a, b)) {
+            fprintf(stderr, "\nERROR AT: 0x%x\n", i*16);
+            failed = true;
+         }
+      }
+
+      if (failed)
+         abort();
+
+      ralloc_free(tmp_ctx);
    }
 
    return valid;
