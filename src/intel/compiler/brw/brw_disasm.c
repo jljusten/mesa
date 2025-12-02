@@ -909,7 +909,7 @@ dest(FILE *file, const struct brw_isa_info *isa, const brw_eu_inst *inst)
 
    if (is_split_send(devinfo, brw_eu_inst_opcode(isa, inst))) {
       /* These are fixed for split sends */
-      type = BRW_TYPE_UD;
+      //type = BRW_TYPE_UD;
       elem_size = 4;
       if (devinfo->ver >= 12) {
          err |= reg(file, brw_eu_inst_send_dst_reg_file(devinfo, inst),
@@ -2148,16 +2148,19 @@ brw_disassemble_inst(FILE *file, const struct brw_isa_info *isa,
       pad(file, 16);
       string(file, "JIP: ");
       write_label(file, devinfo, root_label, offset, brw_eu_inst_jip(devinfo, inst));
+      format(file, "(0x%x)", brw_eu_inst_jip(devinfo, inst));
 
       pad(file, 38);
       string(file, "UIP: ");
       write_label(file, devinfo, root_label, offset, brw_eu_inst_uip(devinfo, inst));
+      format(file, "(0x%x)", brw_eu_inst_uip(devinfo, inst));
    } else if (brw_has_jip(devinfo, opcode)) {
       int jip = brw_eu_inst_jip(devinfo, inst);
 
       pad(file, 16);
       string(file, "JIP: ");
       write_label(file, devinfo, root_label, offset, jip);
+      format(file, "(0x%x)", brw_eu_inst_jip(devinfo, inst));
    } else if (opcode == BRW_OPCODE_JMPI) {
       pad(file, 16);
       err |= src1(file, isa, inst);

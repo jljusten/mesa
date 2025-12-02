@@ -1662,6 +1662,13 @@ enum brw_topology_id
    BRW_TOPOLOGY_ID_EU_THREAD_SIMD,
 };
 
+
+// TODO: Remove me.
+bool
+diff_insts(const struct brw_isa_info *isa,
+           const void *original,
+           const void *encoded);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

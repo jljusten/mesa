@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "brw_disasm.h"
 #include "brw_eu.h"
 #include "brw_disasm_info.h"
 #include "brw_shader.h"
@@ -76,6 +77,12 @@ normalize_brw_reg_for_encoding(brw_reg *reg)
    return brw_reg;
 }
 
+static brw_stage_prog_data *
+clone_prog_data(void *mem_ctx, brw_stage_prog_data *pd)
+{
+   return (brw_stage_prog_data *)ralloc_memdup(mem_ctx, pd, brw_prog_data_size(pd->stage));
+}
+
 brw_generator::brw_generator(const struct brw_compiler *compiler,
                            const struct brw_compile_params *params,
                            struct brw_stage_prog_data *prog_data,
@@ -85,7 +92,8 @@ brw_generator::brw_generator(const struct brw_compiler *compiler,
      devinfo(compiler->devinfo),
      prog_data(prog_data), dispatch_width(0),
      debug_flag(false),
-     shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx)
+     shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx),
+     gen(compiler, params, clone_prog_data(mem_ctx, prog_data), stage)
 {
    p = rzalloc(mem_ctx, struct brw_codegen);
    brw_init_codegen(&compiler->isa, p, mem_ctx);
@@ -1340,7 +1348,10 @@ brw_generator::generate_code(const brw_shader &s,
                                 disasm_info);
 
    int before_size = p->next_insn_offset - start_offset;
-   brw_compact_instructions(p, start_offset, disasm_info);
+
+   // TODO: FIXME.
+   // brw_compact_instructions(p, start_offset, disasm_info);
+
    int after_size = p->next_insn_offset - start_offset;
 
    bool dump_shader_bin = brw_should_dump_shader_bin();
@@ -1476,6 +1487,10 @@ brw_generator::generate_code(const brw_shader &s,
          stats->workgroup_memory_size = 0;
    }
 
+   {
+      gen.generate_code(s, stats);
+   }
+
    return start_offset;
 }
 
@@ -1486,6 +1501,10 @@ brw_generator::add_const_data(void *data, unsigned size)
    if (size > 0) {
       prog_data->const_data_size = size;
       prog_data->const_data_offset = brw_append_data(p, data, size, 32);
+   }
+
+   {
+      gen.add_const_data(data, size);
    }
 }
 
@@ -1505,6 +1524,10 @@ brw_generator::add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt)
                        (uint32_t)offset, (uint32_t)sbt[i]);
       }
    }
+
+   {
+      gen.add_resume_sbt(num_resume_shaders, sbt);
+   }
 }
 
 const unsigned *
@@ -1512,7 +1535,60 @@ brw_generator::get_assembly()
 {
    prog_data->relocs = brw_get_shader_relocs(p, &prog_data->num_relocs);
 
-   return brw_get_program(p, &prog_data->program_size);
+   const unsigned *result = brw_get_program(p, &prog_data->program_size);
+
+   const unsigned *result_gen = gen.get_assembly();
+   assert(result_gen);
+
+   if (result_gen) {
+      if (gen.prog_data->program_size != prog_data->program_size) {
+         fprintf(stderr, "\n\n\n##################################################\n");
+         fprintf(stderr, "##################################################\n");
+         fprintf(stderr, "##################################################\n");
+         fprintf(stderr, "##################################################\n");
+         fprintf(stderr, "size mismatch: original  %u   new %u\n", prog_data->program_size, gen.prog_data->program_size);
+         assert(prog_data->program_size > gen.prog_data->program_size);
+
+         for (unsigned i = 0; i < prog_data->program_size / 16; i++) {
+            auto *a = ((brw_eu_inst *)result) + i;
+            auto *b = ((brw_eu_inst *)result_gen) + i;
+
+            if (brw_eu_inst_opcode(&compiler->isa, a) != brw_eu_inst_opcode(&compiler->isa, b)) {
+               fprintf(stderr, "\nfirst mismatch = %d (0x%x)\n\n", i, i * 16);
+               brw_disassemble_inst(stderr, &compiler->isa, a, false, 0, NULL);
+               brw_disassemble_inst(stderr, &compiler->isa, b, false, 0, NULL);
+               fprintf(stderr, "\n\n\n");
+               break;
+            }
+         }
+
+      } else {
+         bool failed = false;
+         for (unsigned i = 0; i < prog_data->program_size / 16; i++) {
+            if (diff_insts(&compiler->isa, ((gen_raw_inst *)result) + i, ((gen_raw_inst *)result_gen) + i)) {
+               fprintf(stderr, "\nFINAL PASS ERROR AT: 0x%x\n", i * 16);
+               failed = true;
+               break;
+            }
+         }
+
+         if (failed) {
+
+            // for (unsigned i = 0; i < prog_data->program_size / 16; i++) {
+            //    auto *a = ((brw_eu_inst *)result) + i;
+            //    auto *b = ((brw_eu_inst *)result2) + i;
+            //
+            //    brw_disassemble_inst(stderr, &compiler->isa, a, false, 0, NULL);
+            //    brw_disassemble_inst(stderr, &compiler->isa, b, false, 0, NULL);
+            //    fprintf(stderr, "\n");
+            // }
+
+            abort();
+         }
+      }
+   }
+
+   return result;
 }
 
 void brw_prog_data_init(struct brw_stage_prog_data *prog_data,
