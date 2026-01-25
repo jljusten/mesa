@@ -305,6 +305,8 @@ typedef struct gen_validate_params {
 
 bool gen_validate(gen_validate_params *params);
 
+bool gen_finish_structured_cf(gen_inst **insts, int num_insts, int final_halt_idx);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

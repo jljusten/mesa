@@ -3,6 +3,7 @@
 
 libintel_compiler_gen_files = files(
   'gen.h',
+  'gen_control_flow.cpp',
   'gen_print.cpp',
   'gen_private.h',
   'gen_encoding.cpp',
@@ -34,6 +35,7 @@ if with_tests
     executable(
       'intel_compiler_gen_tests',
       files(
+        'gen_control_flow_test.cpp',
         'gen_validate_test.cpp',
       ),
       include_directories : [inc_include, inc_src, inc_intel, inc_intel_compiler],
