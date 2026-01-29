@@ -168,9 +168,11 @@ namespace {
           * and fix the sources of the multiply instead of the destination.
           */
          return inst->dst.hstride * brw_type_size_bytes(inst->dst.type);
-
-      } else if (devinfo->has_bfloat16 && has_bfloat_operands(inst)) {
-         /* Prefer packed since it can be used as a source. */
+      } else if (devinfo->has_bfloat16 && has_bfloat_operands(inst) &&
+                 brw_type_is_bfloat(inst->dst.type)) {
+         const unsigned exec_type_size = get_exec_type_size(inst);
+         if (brw_type_size_bytes(inst->dst.type) < exec_type_size && !is_byte_raw_mov(inst))
+            return exec_type_size;
          return brw_type_size_bytes(inst->dst.type);
 
       } else if (brw_type_size_bytes(inst->dst.type) < get_exec_type_size(inst) &&
@@ -215,7 +217,8 @@ namespace {
    unsigned
    required_dst_byte_offset(const intel_device_info *devinfo, const brw_inst *inst)
    {
-      assert(!brw_type_is_bfloat(inst->dst.type));
+      if (brw_type_is_bfloat(inst->dst.type))
+         return reg_offset(inst->dst) % (reg_unit(devinfo) * REG_SIZE);
 
       for (unsigned i = 0; i < inst->sources; i++) {
          if (!is_uniform(inst->src[i]) && !inst->is_control_source(i))
@@ -332,16 +335,52 @@ namespace {
 
       if (devinfo->has_bfloat16 && has_bfloat_operands(inst)) {
          if (brw_type_is_bfloat(inst->src[i].type)) {
-            const unsigned half_register = REG_SIZE * reg_unit(devinfo) / 2;
-            const unsigned offset = reg_offset(inst->src[i]);
+            if (devinfo->ver < 35) {
+               const unsigned half_register = REG_SIZE * reg_unit(devinfo) / 2;
+               const unsigned offset = reg_offset(inst->src[i]);
+               /* Region restrictions described by PRM
+                *
+                *   Bfloat16 source must be packed.
+                *
+                *   Bfloat16 source must have register offset 0 or half of GRF register.
+                */
+               return !(byte_stride(inst->src[i]) == 2 && (offset == 0 || offset == half_register));
+            } else {
+               const unsigned src_byte_stride = byte_stride(inst->src[i]);
+               const unsigned src_offset_in_dword = src_byte_offset % 4;
+               /* NVL+ platforms - "BF16 Mixed mode Operations":
+                * - Scalar broadcast <0;1,0> allowed at any offset
+                * - Non-extended math: must be strided (byte_stride=4) aligned to offset 2
+                * - Extended math: packed (byte_stride=2) or unpacked (byte_stride=4) allowed
+                */
+               if (is_uniform(inst->src[i]))
+                  return false;
 
-            /* Region restrictions described by PRM
-             *
-             *   Bfloat16 source must be packed.
-             *
-             *   Bfloat16 source must have register offset 0 or half of GRF register.
-             */
-            return !(byte_stride(inst->src[i]) == 2 && (offset == 0 || offset == half_register));
+               const bool is_extended_math = inst->opcode == BRW_OPCODE_MATH;
+
+               if (!is_extended_math) {
+                  /* Non-extended math: bf16 must align to second lowest bf16 of fp32 channel */
+                  if (src_byte_stride != 4)
+                     return true;
+                  if (src_offset_in_dword != 2)
+                     return true;
+               } else {
+                  /* Extended math: both packed and unpacked allowed */
+                  if (src_byte_stride != 2 && src_byte_stride != 4)
+                     return true;
+
+                  if (src_byte_stride == 2 && inst->exec_size > 8) {
+                     const unsigned elem_size = brw_type_size_bytes(inst->src[i].type);
+                     const unsigned width = inst->src[i].width;
+                     const unsigned hstride = inst->src[i].hstride;
+                     const unsigned vstride = inst->src[i].vstride;
+                     if (vstride * elem_size != width * hstride * elem_size)
+                        return true;
+                  }
+               }
+            }
+
+            return false;
          } else {
             assert(inst->src[i].type == BRW_TYPE_F);
             /* Restrict Floats sources mixed with BFloats to also be aligned and packed. */
@@ -373,22 +412,43 @@ namespace {
       if (inst->is_send() || inst->opcode == BRW_OPCODE_DPAS) {
          return false;
 
-      } else if (devinfo->has_bfloat16 && has_bfloat_operands(inst)) {
+      } else if (devinfo->has_bfloat16 && has_bfloat_operands(inst) &&
+                 (inst->dst.type == BRW_TYPE_BF || inst->dst.type == BRW_TYPE_F)) {
          const unsigned stride = byte_stride(inst->dst);
          const unsigned offset = reg_offset(inst->dst);
          const unsigned half_register = REG_SIZE * reg_unit(devinfo) / 2;
+         const bool is_extended_math = inst->opcode == BRW_OPCODE_MATH;
+         const bool is_mov = inst->opcode == BRW_OPCODE_MOV;
 
          /* Region restrictions described by PRM
           *
+          * Pre-NVL (ver < 35):
           *   Packed bfloat16 destination must have register offset of 0 or half of GRF register.
-          *
           *   Unpacked bfloat16 destination must have stride 2 and register offset 0 or 1.
+          *   Note numbers above are in terms of elements (2 bytes).
           *
-          * Note numbers above are in terms of elements (2 bytes).
+          * NVL (ver >= 35):
+          *   Non-extended math (non-MOV): stride=4, offset 2 only
+          *   Extended math: stride=4, offset 0 or 2
+          *   MOV: standard integer regioning rules
           */
          if (inst->dst.type == BRW_TYPE_BF) {
-            return !(stride == 2 && (offset == 0 || offset == half_register)) &&
-                   !(stride == 4 && (offset == 0 || offset == 2));
+            bool bf_packing_valid;
+            const unsigned offset_in_dword = offset % 4;
+
+            if (devinfo->ver >= 35 && !is_extended_math && !is_mov) {
+               bf_packing_valid = (stride == 4) &&
+                                  (offset_in_dword == 2 || offset == half_register + 2);
+            } else if (devinfo->ver >= 35 && is_extended_math) {
+               bf_packing_valid = (stride == 4) &&
+                                  (offset_in_dword == 0 || offset_in_dword == 2 ||
+                                   offset == half_register || offset == half_register + 2);
+            } else {
+               bf_packing_valid = (stride == 2 && (offset == 0 || offset == half_register)) ||
+                                  (stride == 4 && (offset == 0 || offset == 2 ||
+                                                   offset == half_register || offset == half_register + 2));
+            }
+            return !bf_packing_valid;
          } else {
             assert(inst->dst.type == BRW_TYPE_F);
             /* Restrict Floats sources mixed with BFloats to also be aligned and packed. */
