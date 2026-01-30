@@ -232,7 +232,7 @@ brw_asm = static_library(
   'brw_asm',
   ['brw_asm.c', brw_gram_tab[0], brw_gram_tab[1], brw_lex_yy_c],
   dependencies : brw_asm_deps,
-  include_directories : [inc_include, inc_src, inc_intel],
+  include_directories : [inc_include, inc_src, inc_intel, inc_intel_compiler],
   c_args : [no_override_init_args],
   gnu_symbol_visibility : 'hidden',
   build_by_default : false,
@@ -247,7 +247,7 @@ brw_asm_tool = executable(
   'brw_asm',
   ['brw_asm_tool.c'],
   dependencies : idep_brw_asm,
-  include_directories : [inc_include, inc_src, inc_intel],
+  include_directories : [inc_include, inc_src, inc_intel, inc_intel_compiler],
   c_args : [no_override_init_args],
   gnu_symbol_visibility : 'hidden',
   install : true

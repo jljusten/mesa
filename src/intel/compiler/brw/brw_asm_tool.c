@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <getopt.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <getopt.h>
 
 #include "util/ralloc.h"
-#include "brw_eu_inst.h"
 #include "dev/intel_device_info.h"
 
 #include "brw_asm.h"
@@ -40,19 +40,25 @@ print_help(const char *progname, FILE *file)
 }
 
 static uint32_t
-get_dword(const brw_eu_inst *inst, int idx)
+get_dword(const void *inst, int idx)
 {
    uint32_t dword;
-   memcpy(&dword, (char *)inst + 4 * idx, sizeof(dword));
+   memcpy(&dword, (const uint8_t *)inst + 4 * idx, sizeof(dword));
    return dword;
 }
 
+static bool
+inst_is_compacted(const void *inst)
+{
+   return (get_dword(inst, 0) >> 29) & 0x1;
+}
+
 static void
-print_instruction(FILE *output, bool compact, const brw_eu_inst *instruction)
+print_instruction(FILE *output, bool compact, const uint8_t *instruction)
 {
    int byte_limit;
 
-   byte_limit = (compact == true) ? 8 : 16;
+   byte_limit = compact ? 8 : 16;
 
    switch (output_type) {
    case OPT_OUTPUT_HEX: {
@@ -218,15 +224,10 @@ int main(int argc, char **argv)
       fprintf(output, "{\n");
 
    for (int offset = 0; offset < r.bin_size;) {
-      const brw_eu_inst *insn = r.bin + offset;
-      bool compacted = false;
+      const uint8_t *insn = (const uint8_t *)r.bin + offset;
+      bool compacted = compact && inst_is_compacted(insn);
 
-      if (compact && brw_eu_inst_cmpt_control(devinfo, insn)) {
-            offset += 8;
-            compacted = true;
-      } else {
-            offset += 16;
-      }
+      offset += compacted ? 8 : 16;
 
       print_instruction(output, compacted, insn);
    }
