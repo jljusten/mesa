@@ -12,16 +12,22 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "brw_eu.h"
 #include "brw_eu_defines.h"
-#include "brw_eu_inst.h"
-#include "brw_reg.h"
 #include "brw_reg_type.h"
 #include "dev/intel_device_info.h"
-#include "util/list.h"
+#include "intel/compiler/gen/gen.h"
+#include "util/hash_table.h"
+#include "util/macros.h"
+#include "util/u_dynarray.h"
 
 /* glibc < 2.27 defines OVERFLOW in /usr/include/math.h. */
 #undef OVERFLOW
+
+static inline unsigned
+reg_unit(const struct intel_device_info *devinfo)
+{
+   return devinfo->ver >= 20 ? 2 : 1;
+}
 
 #ifndef YY_TYPEDEF_YY_SCANNER_T
 #define YY_TYPEDEF_YY_SCANNER_T
@@ -30,22 +36,18 @@ typedef void *yyscan_t;
 
 typedef struct brw_asm_parser {
    const struct intel_device_info *devinfo;
-   struct brw_codegen *p;
+   void *mem_ctx;
    const char *input_filename;
    int errors;
    bool compaction_warning_given;
    struct hash_table *labels;
 
+   struct util_dynarray insts;
+
    /* Lexer state. */
    yyscan_t scanner;
    int saved_state;
 } brw_asm_parser;
-
-/* A helper for accessing the last instruction emitted.  This makes it easy
- * to set various bits on an instruction without having to create temporary
- * variable and assign the emitted instruction to those.
- */
-#define brw_last_inst brw_eu_last_inst(parser->p)
 
 int yyparse(struct brw_asm_parser *parser);
 char *brw_asm_get_text(yyscan_t scanner);
@@ -102,6 +104,15 @@ struct msgdesc {
    unsigned ex_bso:1;
    unsigned src1_len:5;
 };
+
+unsigned gen_asm_inst_count(const struct brw_asm_parser *parser);
+
+gen_inst *gen_asm_next_inst(struct brw_asm_parser *parser, gen_opcode opcode);
+void i965_asm_set_instruction_options(struct brw_asm_parser *parser, gen_inst *inst,
+                                      const struct predicate *pred,
+                                      const struct condition *cond,
+                                      const struct options *options);
+
 
 void brw_asm_label_set(struct brw_asm_parser *parser, const char *name);
 void brw_asm_label_use_jip(struct brw_asm_parser *parser, const char *name);

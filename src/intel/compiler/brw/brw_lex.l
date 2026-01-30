@@ -38,7 +38,6 @@
 %%
 
    struct brw_asm_parser *parser = yyextra;
-   struct brw_codegen *p = parser->p;
 
  /* eat up single line comment */
 \/\/.*[\r\n]    { yycolumn = 1; }
@@ -62,86 +61,86 @@
 null            { BEGIN(REG); return NULL_TOKEN; }
 
  /* Opcodes */
-add             { yylval->integer = BRW_OPCODE_ADD; return ADD; }
-add3            { yylval->integer = BRW_OPCODE_ADD3; return ADD3; }
-addc            { yylval->integer = BRW_OPCODE_ADDC; return ADDC; }
-and             { yylval->integer = BRW_OPCODE_AND; return AND; }
-asr             { yylval->integer = BRW_OPCODE_ASR; return ASR; }
-avg             { yylval->integer = BRW_OPCODE_AVG; return AVG; }
-bfe             { yylval->integer = BRW_OPCODE_BFE; return BFE; }
-bfi1            { yylval->integer = BRW_OPCODE_BFI1; return BFI1; }
-bfi2            { yylval->integer = BRW_OPCODE_BFI2; return BFI2; }
-bfrev           { yylval->integer = BRW_OPCODE_BFREV; return BFREV; }
-brc             { yylval->integer = BRW_OPCODE_BRC; return BRC; }
-brd             { yylval->integer = BRW_OPCODE_BRD; return BRD; }
-break           { yylval->integer = BRW_OPCODE_BREAK; return BREAK; }
-call            { yylval->integer = BRW_OPCODE_CALL; return CALL; }
-calla           { yylval->integer = BRW_OPCODE_CALLA; return CALLA; }
-cbit            { yylval->integer = BRW_OPCODE_CBIT; return CBIT; }
-cmp             { yylval->integer = BRW_OPCODE_CMP; return CMP; }
-cmpn            { yylval->integer = BRW_OPCODE_CMPN; return CMPN; }
-cont            { yylval->integer = BRW_OPCODE_CONTINUE; return CONT; }
-csel            { yylval->integer = BRW_OPCODE_CSEL; return CSEL; }
-do              { yylval->integer = BRW_OPCODE_DO; return DO; }
-dp2             { yylval->integer = BRW_OPCODE_DP2; return DP2; }
-dp3             { yylval->integer = BRW_OPCODE_DP3; return DP3; }
-dp4             { yylval->integer = BRW_OPCODE_DP4; return DP4; }
-dp4a            { yylval->integer = BRW_OPCODE_DP4A; return DP4A; }
-dpas            { yylval->integer = BRW_OPCODE_DPAS; return DPAS; }
-dph             { yylval->integer = BRW_OPCODE_DPH; return DPH; }
-else            { yylval->integer = BRW_OPCODE_ELSE; return ELSE; }
-endif           { yylval->integer = BRW_OPCODE_ENDIF; return ENDIF; }
-fbh             { yylval->integer = BRW_OPCODE_FBH; return FBH; }
-fbl             { yylval->integer = BRW_OPCODE_FBL; return FBL; }
-frc             { yylval->integer = BRW_OPCODE_FRC; return FRC; }
-goto            { yylval->integer = BRW_OPCODE_GOTO; return GOTO; }
-halt            { yylval->integer = BRW_OPCODE_HALT; return HALT; }
-if              { yylval->integer = BRW_OPCODE_IF; return IF; }
-illegal         { yylval->integer = BRW_OPCODE_ILLEGAL; return ILLEGAL; }
-join            { yylval->integer = BRW_OPCODE_JOIN; return JOIN; }
-jmpi            { yylval->integer = BRW_OPCODE_JMPI; return JMPI; }
-line            { yylval->integer = BRW_OPCODE_LINE; return LINE; }
-lrp             { yylval->integer = BRW_OPCODE_LRP; return LRP; }
-lzd             { yylval->integer = BRW_OPCODE_LZD; return LZD; }
-mac             { yylval->integer = BRW_OPCODE_MAC; return MAC; }
-mach            { yylval->integer = BRW_OPCODE_MACH; return MACH; }
-mad             { yylval->integer = BRW_OPCODE_MAD; return MAD; }
-madm            { yylval->integer = BRW_OPCODE_MADM; return MADM; }
-mov             { yylval->integer = BRW_OPCODE_MOV; return MOV; }
-movi            { yylval->integer = BRW_OPCODE_MOVI; return MOVI; }
-mul             { yylval->integer = BRW_OPCODE_MUL; return MUL; }
-nop             { yylval->integer = BRW_OPCODE_NOP; return NOP; }
-not             { yylval->integer = BRW_OPCODE_NOT; return NOT; }
-or              { yylval->integer = BRW_OPCODE_OR; return OR; }
-pln             { yylval->integer = BRW_OPCODE_PLN; return PLN; }
-ret             { yylval->integer = BRW_OPCODE_RET; return RET; }
-rndd            { yylval->integer = BRW_OPCODE_RNDD; return RNDD; }
-rnde            { yylval->integer = BRW_OPCODE_RNDE; return RNDE; }
-rndu            { yylval->integer = BRW_OPCODE_RNDU; return RNDU; }
-rndz            { yylval->integer = BRW_OPCODE_RNDZ; return RNDZ; }
-rol             { yylval->integer = BRW_OPCODE_ROL; return ROL; }
-ror             { yylval->integer = BRW_OPCODE_ROR; return ROR; }
-sel             { yylval->integer = BRW_OPCODE_SEL; return SEL; }
+add             { yylval->integer = GEN_OP_ADD; return ADD; }
+add3            { yylval->integer = GEN_OP_ADD3; return ADD3; }
+addc            { yylval->integer = GEN_OP_ADDC; return ADDC; }
+and             { yylval->integer = GEN_OP_AND; return AND; }
+asr             { yylval->integer = GEN_OP_ASR; return ASR; }
+avg             { yylval->integer = GEN_OP_AVG; return AVG; }
+bfe             { yylval->integer = GEN_OP_BFE; return BFE; }
+bfi1            { yylval->integer = GEN_OP_BFI1; return BFI1; }
+bfi2            { yylval->integer = GEN_OP_BFI2; return BFI2; }
+bfrev           { yylval->integer = GEN_OP_BFREV; return BFREV; }
+brc             { yylval->integer = GEN_OP_BRC; return BRC; }
+brd             { yylval->integer = GEN_OP_BRD; return BRD; }
+break           { yylval->integer = GEN_OP_BREAK; return BREAK; }
+call            { yylval->integer = GEN_OP_CALL; return CALL; }
+calla           { yylval->integer = GEN_OP_CALLA; return CALLA; }
+cbit            { yylval->integer = GEN_OP_CBIT; return CBIT; }
+cmp             { yylval->integer = GEN_OP_CMP; return CMP; }
+cmpn            { yylval->integer = GEN_OP_CMPN; return CMPN; }
+cont            { yylval->integer = GEN_OP_CONTINUE; return CONT; }
+csel            { yylval->integer = GEN_OP_CSEL; return CSEL; }
+do              { yylval->integer = GEN_OP_NOP; return DO; }
+dp2             { yylval->integer = GEN_OP_DP2; return DP2; }
+dp3             { yylval->integer = GEN_OP_DP3; return DP3; }
+dp4             { yylval->integer = GEN_OP_DP4; return DP4; }
+dp4a            { yylval->integer = GEN_OP_DP4A; return DP4A; }
+dpas            { yylval->integer = GEN_OP_DPAS; return DPAS; }
+dph             { yylval->integer = GEN_OP_DPH; return DPH; }
+else            { yylval->integer = GEN_OP_ELSE; return ELSE; }
+endif           { yylval->integer = GEN_OP_ENDIF; return ENDIF; }
+fbh             { yylval->integer = GEN_OP_FBH; return FBH; }
+fbl             { yylval->integer = GEN_OP_FBL; return FBL; }
+frc             { yylval->integer = GEN_OP_FRC; return FRC; }
+goto            { yylval->integer = GEN_OP_GOTO; return GOTO; }
+halt            { yylval->integer = GEN_OP_HALT; return HALT; }
+if              { yylval->integer = GEN_OP_IF; return IF; }
+illegal         { yylval->integer = GEN_OP_ILLEGAL; return ILLEGAL; }
+join            { yylval->integer = GEN_OP_JOIN; return JOIN; }
+jmpi            { yylval->integer = GEN_OP_JMPI; return JMPI; }
+line            { yylval->integer = GEN_OP_LINE; return LINE; }
+lrp             { yylval->integer = GEN_OP_LRP; return LRP; }
+lzd             { yylval->integer = GEN_OP_LZD; return LZD; }
+mac             { yylval->integer = GEN_OP_MAC; return MAC; }
+mach            { yylval->integer = GEN_OP_MACH; return MACH; }
+mad             { yylval->integer = GEN_OP_MAD; return MAD; }
+madm            { yylval->integer = GEN_OP_MADM; return MADM; }
+mov             { yylval->integer = GEN_OP_MOV; return MOV; }
+movi            { yylval->integer = GEN_OP_MOVI; return MOVI; }
+mul             { yylval->integer = GEN_OP_MUL; return MUL; }
+nop             { yylval->integer = GEN_OP_NOP; return NOP; }
+not             { yylval->integer = GEN_OP_NOT; return NOT; }
+or              { yylval->integer = GEN_OP_OR; return OR; }
+pln             { yylval->integer = GEN_OP_PLN; return PLN; }
+ret             { yylval->integer = GEN_OP_RET; return RET; }
+rndd            { yylval->integer = GEN_OP_RNDD; return RNDD; }
+rnde            { yylval->integer = GEN_OP_RNDE; return RNDE; }
+rndu            { yylval->integer = GEN_OP_RNDU; return RNDU; }
+rndz            { yylval->integer = GEN_OP_RNDZ; return RNDZ; }
+rol             { yylval->integer = GEN_OP_ROL; return ROL; }
+ror             { yylval->integer = GEN_OP_ROR; return ROR; }
+sel             { yylval->integer = GEN_OP_SEL; return SEL; }
 send            {
-                   yylval->integer = BRW_OPCODE_SEND;
+                   yylval->integer = GEN_OP_SEND;
                    return parser->devinfo->ver < 12 ? SEND_GFX4 : SEND_GFX12;
                 }
 sendc           {
-                   yylval->integer = BRW_OPCODE_SENDC;
+                   yylval->integer = GEN_OP_SENDC;
                    return parser->devinfo->ver < 12 ? SENDC_GFX4 : SENDC_GFX12;
                 }
-sends           { yylval->integer = BRW_OPCODE_SENDS; return SENDS; }
-sendsc          { yylval->integer = BRW_OPCODE_SENDSC; return SENDSC; }
-shl             { yylval->integer = BRW_OPCODE_SHL; return SHL; }
-shr             { yylval->integer = BRW_OPCODE_SHR; return SHR; }
-smov            { yylval->integer = BRW_OPCODE_SMOV; return SMOV; }
-srnd            { yylval->integer = BRW_OPCODE_SRND; return SRND; }
-subb            { yylval->integer = BRW_OPCODE_SUBB; return SUBB; }
-wait            { yylval->integer = BRW_OPCODE_WAIT; return WAIT; }
-while           { yylval->integer = BRW_OPCODE_WHILE; return WHILE; }
-xor             { yylval->integer = BRW_OPCODE_XOR; return XOR; }
-sync            { yylval->integer = BRW_OPCODE_SYNC; return SYNC; }
-math            { yylval->integer = BRW_OPCODE_MATH; return MATH; }
+sends           { yylval->integer = GEN_OP_SENDS; return SENDS; }
+sendsc          { yylval->integer = GEN_OP_SENDSC; return SENDSC; }
+shl             { yylval->integer = GEN_OP_SHL; return SHL; }
+shr             { yylval->integer = GEN_OP_SHR; return SHR; }
+smov            { yylval->integer = GEN_OP_SMOV; return SMOV; }
+srnd            { yylval->integer = GEN_OP_SRND; return SRND; }
+subb            { yylval->integer = GEN_OP_SUBB; return SUBB; }
+wait            { yylval->integer = GEN_OP_WAIT; return WAIT; }
+while           { yylval->integer = GEN_OP_WHILE; return WHILE; }
+xor             { yylval->integer = GEN_OP_XOR; return XOR; }
+sync            { yylval->integer = GEN_OP_SYNC; return SYNC; }
+math            { yylval->integer = GEN_OP_MATH; return MATH; }
 
  /* extended math functions */
 cos             { yylval->integer = BRW_MATH_FUNCTION_COS; return COS; }
@@ -409,7 +408,7 @@ sr[0-9]+        { yylval->integer = atoi(yytext + 2); return STATEREG; }
 
  /* jump label target */
 [a-zA-Z_][0-9a-zA-Z_]*":" {
-        yylval->string = ralloc_strdup(p->mem_ctx, yytext);
+        yylval->string = ralloc_strdup(parser->mem_ctx, yytext);
         /* Stomp the trailing ':' */
         yylval->string[yyleng - 1] = '\0';
         return JUMP_LABEL_TARGET;
@@ -417,7 +416,7 @@ sr[0-9]+        { yylval->integer = atoi(yytext + 2); return STATEREG; }
 
  /* jump label */
 <LABEL>[a-zA-Z_][0-9a-zA-Z_]* {
-        yylval->string = ralloc_strdup(p->mem_ctx, yytext);
+        yylval->string = ralloc_strdup(parser->mem_ctx, yytext);
         BEGIN(INITIAL);
         return JUMP_LABEL;
 }

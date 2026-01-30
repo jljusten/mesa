@@ -13,6 +13,27 @@
 
 #undef ALIGN16
 
+#ifndef WRITEMASK_X
+#define WRITEMASK_X 0x1
+#define WRITEMASK_Y 0x2
+#define WRITEMASK_Z 0x4
+#define WRITEMASK_W 0x8
+#define WRITEMASK_XY 0x3
+#define WRITEMASK_XYZ 0x7
+#define WRITEMASK_YZW 0xE
+#define WRITEMASK_XYZW 0xF
+#endif
+
+#ifndef BRW_SWIZZLE4
+#define BRW_SWIZZLE_X 0
+#define BRW_SWIZZLE_Y 1
+#define BRW_SWIZZLE_Z 2
+#define BRW_SWIZZLE_W 3
+#define BRW_SWIZZLE4(a,b,c,d) (((a)<<0) | ((b)<<2) | ((c)<<4) | ((d)<<6))
+#define BRW_SWIZZLE_NOOP      BRW_SWIZZLE4(0,1,2,3)
+#define BRW_SWIZZLE_XYZW      BRW_SWIZZLE4(0,1,2,3)
+#endif
+
 #define YYLTYPE YYLTYPE
 typedef struct YYLTYPE
 {
@@ -48,12 +69,6 @@ message(struct brw_asm_parser *parser, enum message_level level,
    va_end(args);
 }
 
-#define warn(flag, l, fmt, ...)                         \
-   do {                                                 \
-      if (warning_flags & WARN_ ## flag)                \
-         message(parser, WARN, l, fmt, ## __VA_ARGS__); \
-   } while (0)
-
 #define error(l, fmt, ...)                              \
    do {                                                 \
       message(parser, ERROR, l, fmt, ## __VA_ARGS__);   \
@@ -65,235 +80,214 @@ isPowerofTwo(unsigned int x)
    return x && (!(x & (x - 1)));
 }
 
-static struct brw_reg
-set_direct_src_operand(struct brw_reg *reg, int type)
+static gen_operand
+asm_make_base_reg(enum gen_file file, unsigned nr, unsigned subnr)
 {
-   return brw_make_reg(reg->file,
-                       reg->nr,
-                       reg->subnr,
-                       0,      // negate
-                       0,      // abs
-                       type,
-                       0,      // vstride
-                       0,      // width
-                       0,      // hstride
-                       BRW_SWIZZLE_NOOP,
-                       WRITEMASK_XYZW);
+   gen_operand o = {};
+   o.file = file;
+   o.nr = nr;
+   o.subnr = subnr;
+   o.type = BRW_TYPE_INVALID;
+   return o;
 }
 
-static void
-i965_asm_unary_instruction(int opcode, struct brw_codegen *p,
-                           struct brw_reg dest, struct brw_reg src0)
+static gen_region
+asm_make_region(unsigned vstride, unsigned width, unsigned hstride)
 {
-   switch (opcode) {
-   case BRW_OPCODE_BFREV:
-      brw_BFREV(p, dest, src0);
-      break;
-   case BRW_OPCODE_CBIT:
-      brw_CBIT(p, dest, src0);
-      break;
-   case BRW_OPCODE_MOV:
-      brw_MOV(p, dest, src0);
-      break;
-   case BRW_OPCODE_FBL:
-      brw_FBL(p, dest, src0);
-      break;
-   case BRW_OPCODE_FRC:
-      brw_FRC(p, dest, src0);
-      break;
-   case BRW_OPCODE_FBH:
-      brw_FBH(p, dest, src0);
-      break;
-   case BRW_OPCODE_NOT:
-      brw_NOT(p, dest, src0);
-      break;
-   case BRW_OPCODE_RNDE:
-      brw_RNDE(p, dest, src0);
-      break;
-   case BRW_OPCODE_RNDZ:
-      brw_RNDZ(p, dest, src0);
-      break;
-   case BRW_OPCODE_RNDD:
-      brw_RNDD(p, dest, src0);
-      break;
-   case BRW_OPCODE_LZD:
-      brw_LZD(p, dest, src0);
-      break;
-   case BRW_OPCODE_RNDU:
-      fprintf(stderr, "Opcode BRW_OPCODE_RNDU unhandled\n");
-      break;
-   default:
-      fprintf(stderr, "Unsupported unary opcode\n");
+   return (gen_region){ vstride, width, hstride };
+}
+
+static gen_operand
+asm_finalize_operand(gen_operand o)
+{
+   if (!o.indirect && o.file != GEN_IMM)
+      o.subnr *= brw_type_size_bytes(o.type);
+   return o;
+}
+
+static gen_operand
+asm_make_direct_operand(gen_operand base, enum brw_reg_type type,
+                        gen_region region, unsigned swizzle,
+                        unsigned writemask, bool negate, bool abs)
+{
+   base.type = type;
+   base.negate = negate;
+   base.abs = abs;
+   base.region = region;
+   base.swizzle = swizzle;
+   base.writemask = writemask;
+   return asm_finalize_operand(base);
+}
+
+static gen_operand
+asm_make_indirect_operand(gen_operand base, enum brw_reg_type type,
+                          gen_region region, unsigned swizzle,
+                          unsigned writemask, bool negate, bool abs)
+{
+   base.indirect = true;
+   base.type = type;
+   base.negate = negate;
+   base.abs = abs;
+   base.region = region;
+   base.swizzle = swizzle;
+   base.writemask = writemask;
+   return base;
+}
+
+static gen_operand
+asm_make_imm_operand(enum brw_reg_type type, uint64_t value)
+{
+   gen_operand o = {};
+   o.file = GEN_IMM;
+   o.type = type;
+   o.imm = value;
+   return o;
+}
+
+static unsigned
+brw_swizzle_for_mask(unsigned mask)
+{
+   unsigned last = (mask ? ffs(mask) - 1 : 0);
+   unsigned swz[4];
+
+   for (unsigned i = 0; i < 4; i++)
+      last = swz[i] = (mask & (1 << i) ? i : last);
+
+   return BRW_SWIZZLE4(swz[0], swz[1], swz[2], swz[3]);
+}
+
+static gen_operand
+brw_null_reg(void)
+{
+   gen_operand o = asm_make_base_reg(GEN_ARF, BRW_ARF_NULL, 0);
+   o.type = BRW_TYPE_F;
+   o.region = asm_make_region(8, 8, 1);
+   o.swizzle = BRW_SWIZZLE_XYZW;
+   o.writemask = WRITEMASK_XYZW;
+   return o;
+}
+
+static gen_operand
+brw_ip_reg(void)
+{
+   gen_operand o = asm_make_base_reg(GEN_ARF, BRW_ARF_IP, 0);
+   o.type = BRW_TYPE_UD;
+   o.region = asm_make_region(4, 1, 0);
+   o.swizzle = BRW_SWIZZLE_XYZW;
+   o.writemask = WRITEMASK_XYZW;
+   return o;
+}
+
+static gen_operand
+brw_ud8_reg(enum gen_file file, unsigned nr, unsigned subnr)
+{
+   gen_operand o = asm_make_base_reg(file, nr, subnr);
+   o.type = BRW_TYPE_UD;
+   o.region = asm_make_region(8, 8, 1);
+   o.swizzle = BRW_SWIZZLE_XYZW;
+   o.writemask = WRITEMASK_XYZW;
+   return o;
+}
+
+static inline enum gfx12_systolic_depth
+translate_systolic_depth(unsigned d)
+{
+   switch (d) {
+   case 2:  return BRW_SYSTOLIC_DEPTH_2;
+   case 4:  return BRW_SYSTOLIC_DEPTH_4;
+   case 8:  return BRW_SYSTOLIC_DEPTH_8;
+   case 16: return BRW_SYSTOLIC_DEPTH_16;
+   default: UNREACHABLE("Invalid systolic depth.");
    }
 }
 
-static void
-i965_asm_binary_instruction(int opcode,
-                            struct brw_codegen *p,
-                            struct brw_reg dest,
-                            struct brw_reg src0,
-                            struct brw_reg src1)
+static gen_inst *
+i965_asm_unary_instruction(struct brw_asm_parser *parser, gen_opcode opcode,
+                      gen_operand dest, gen_operand src0)
 {
-   switch (opcode) {
-   case BRW_OPCODE_ADDC:
-      brw_ADDC(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_BFI1:
-      brw_BFI1(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_DP2:
-      brw_DP2(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_DP3:
-      brw_DP3(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_DP4:
-      brw_DP4(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_DPH:
-      brw_DPH(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_LINE:
-      brw_LINE(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_MAC:
-      brw_MAC(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_MACH:
-      brw_MACH(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_PLN:
-      brw_PLN(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_ROL:
-      brw_ROL(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_ROR:
-      brw_ROR(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_SUBB:
-      brw_SUBB(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_ADD:
-      brw_ADD(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_CMP:
-      /* Third parameter is conditional modifier
-       * which gets updated later
-       */
-      brw_CMP(p, dest, 0, src0, src1);
-      break;
-   case BRW_OPCODE_AND:
-      brw_AND(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_ASR:
-      brw_ASR(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_AVG:
-      brw_AVG(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_OR:
-      brw_OR(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_SEL:
-      brw_SEL(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_SHL:
-      brw_SHL(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_SHR:
-      brw_SHR(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_XOR:
-      brw_XOR(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_MUL:
-      brw_MUL(p, dest, src0, src1);
-      break;
-   case BRW_OPCODE_SRND:
-      brw_SRND(p, dest, src0, src1);
-      break;
-   default:
-      fprintf(stderr, "Unsupported binary opcode\n");
-   }
+   gen_inst *inst = gen_asm_next_inst(parser, opcode);
+   inst->dst = dest;
+   inst->src[0] = src0;
+   return inst;
+}
+
+static gen_inst *
+i965_asm_binary_instruction(struct brw_asm_parser *parser, gen_opcode opcode,
+                       gen_operand dest, gen_operand src0,
+                       gen_operand src1)
+{
+   gen_inst *inst = gen_asm_next_inst(parser, opcode);
+   inst->dst = dest;
+   inst->src[0] = src0;
+   inst->src[1] = src1;
+   return inst;
+}
+
+static gen_inst *
+i965_asm_ternary_instruction(struct brw_asm_parser *parser, gen_opcode opcode,
+                        gen_operand dest, gen_operand src0,
+                        gen_operand src1, gen_operand src2)
+{
+   gen_inst *inst = gen_asm_next_inst(parser, opcode);
+   inst->dst = dest;
+   inst->src[0] = src0;
+   inst->src[1] = src1;
+   inst->src[2] = src2;
+   return inst;
 }
 
 static void
-i965_asm_ternary_instruction(int opcode,
-                             struct brw_codegen *p,
-                             struct brw_reg dest,
-                             struct brw_reg src0,
-                             struct brw_reg src1,
-                             struct brw_reg src2)
+apply_common_fields(struct brw_asm_parser *parser, gen_inst *inst,
+                    const struct predicate *pred,
+                    const struct condition *cond,
+                    const struct options *options,
+                    unsigned exec_size, bool saturate)
 {
-   switch (opcode) {
-   case BRW_OPCODE_MAD:
-      brw_MAD(p, dest, src0, src1, src2);
-      break;
-   case BRW_OPCODE_CSEL:
-      brw_CSEL(p, dest, src0, src1, src2);
-      break;
-   case BRW_OPCODE_LRP:
-      brw_LRP(p, dest, src0, src1, src2);
-      break;
-   case BRW_OPCODE_BFE:
-      brw_BFE(p, dest, src0, src1, src2);
-      break;
-   case BRW_OPCODE_BFI2:
-      brw_BFI2(p, dest, src0, src1, src2);
-      break;
-   case BRW_OPCODE_DP4A:
-      brw_DP4A(p, dest, src0, src1, src2);
-      break;
-   case BRW_OPCODE_ADD3:
-      brw_ADD3(p, dest, src0, src1, src2);
-      break;
-   default:
-      fprintf(stderr, "Unsupported ternary opcode\n");
-   }
-}
+   i965_asm_set_instruction_options(parser, inst, pred, cond, options);
+   inst->exec_size = exec_size;
+   inst->saturate = saturate;
 
-static void
-i965_asm_set_instruction_options(struct brw_asm_parser *parser,
-                                 struct options options)
-{
-   const struct intel_device_info *devinfo = parser->devinfo;
-   const struct brw_isa_info *isa = parser->p->isa;
+   if (inst->align16) {
+      for (unsigned i = 0; i < ARRAY_SIZE(inst->src); i++)
+         inst->src[i].rep_ctrl = false;
 
-   brw_eu_inst_set_access_mode(devinfo, brw_last_inst,
-                               options.access_mode);
-   brw_eu_inst_set_mask_control(devinfo, brw_last_inst,
-                                options.mask_control);
-   if (devinfo->ver < 12) {
-      brw_eu_inst_set_thread_control(devinfo, brw_last_inst,
-                                     options.thread_control);
-      brw_eu_inst_set_no_dd_check(devinfo, brw_last_inst,
-                                  options.no_dd_check);
-      brw_eu_inst_set_no_dd_clear(devinfo, brw_last_inst,
-                                  options.no_dd_clear);
+      switch (inst->opcode) {
+      case GEN_OP_CSEL:
+      case GEN_OP_BFE:
+      case GEN_OP_BFI2:
+      case GEN_OP_LRP:
+      case GEN_OP_MAD:
+      case GEN_OP_DP4A:
+      case GEN_OP_ADD3:
+         inst->src[0].rep_ctrl = inst->src[0].region.vstride == 0;
+         inst->src[1].rep_ctrl = inst->src[1].region.vstride == 0;
+         inst->src[2].rep_ctrl = inst->src[2].region.vstride == 0;
+         break;
+      default:
+         break;
+      }
    } else {
-      enum opcode opcode = brw_eu_inst_opcode(isa, brw_last_inst);
-      brw_eu_inst_set_swsb(devinfo, brw_last_inst,
-                           tgl_swsb_encode(devinfo, options.depinfo, opcode));
-   }
-   brw_eu_inst_set_debug_control(devinfo, brw_last_inst,
-                                 options.debug_control);
-   if (brw_has_branch_ctrl(devinfo, brw_eu_inst_opcode(isa, brw_last_inst))) {
-      if (options.acc_wr_control)
-         error(NULL, "Instruction does not support AccWrEnable\n");
+      inst->dst.swizzle = 0;
+      inst->dst.writemask = 0;
 
-      brw_eu_inst_set_branch_control(devinfo, brw_last_inst,
-                                     options.branch_control);
-   } else if (options.branch_control) {
-      error(NULL, "Instruction does not support BranchCtrl\n");
-   } else if (devinfo->ver < 20) {
-      brw_eu_inst_set_acc_wr_control(devinfo, brw_last_inst,
-                                     options.acc_wr_control);
+      for (unsigned i = 0; i < ARRAY_SIZE(inst->src); i++) {
+         inst->src[i].swizzle = 0;
+         inst->src[i].writemask = 0;
+         inst->src[i].rep_ctrl = false;
+      }
    }
-   brw_eu_inst_set_cmpt_control(devinfo, brw_last_inst,
-                                options.compaction);
+
+   if (!inst->align16 && inst->exec_size == 1) {
+      if (inst->src[0].file != GEN_IMM && inst->src[0].region.width == 1) {
+         inst->src[0].region.vstride = 0;
+         inst->src[0].region.hstride = 0;
+      }
+      if (inst->src[1].file != GEN_IMM && inst->src[1].region.width == 1) {
+         inst->src[1].region.vstride = 0;
+         inst->src[1].region.hstride = 0;
+      }
+   }
 }
-
 %}
 
 %pure-parser
@@ -306,12 +300,11 @@ i965_asm_set_instruction_options(struct brw_asm_parser *parser,
 
 %union {
    char *string;
-   double number;
    int integer;
    unsigned long long int llint;
-   struct brw_reg reg;
+   gen_operand reg;
+   gen_region region;
    enum brw_reg_type reg_type;
-   struct brw_codegen *program;
    struct predicate predicate;
    struct condition condition;
    struct options options;
@@ -319,7 +312,6 @@ i965_asm_set_instruction_options(struct brw_asm_parser *parser,
    struct msgdesc msgdesc;
    struct tgl_swsb depinfo;
    struct { int sdepth; int rcount; } dpas_params;
-   brw_eu_inst *instruction;
 }
 
 %code {
@@ -501,9 +493,10 @@ yylex(YYSTYPE *yylval_param, YYLTYPE *yylloc_param,
 /* src operand */
 %type <reg> directsrcoperand directsrcaccoperand indirectsrcoperand srcacc
 %type <reg> srcarcoperandex srcaccimm srcarcoperandex_typed srcimm
-%type <reg> indirectgenreg indirectregion
-%type <reg> immreg src reg32 payload directgenreg_list addrparam region
-%type <reg> region_wh directgenreg
+%type <reg> indirectgenreg
+%type <region> indirectregion region region_wh
+%type <reg> immreg src reg32 payload directgenreg_list addrparam
+%type <reg> directgenreg
 %type <reg> desc ex_desc reg32a
 %type <integer> swizzle
 
@@ -520,8 +513,7 @@ yylex(YYSTYPE *yylval_param, YYLTYPE *yylloc_param,
 
 /* instruction opcodes */
 %type <integer> unaryopcodes binaryopcodes binaryaccopcodes ternaryopcodes
-%type <integer> sendop sendsop
-%type <instruction> sendopcode sendsopcode
+%type <integer> sendop sendsop sendopcode sendsopcode
 
 %type <integer> negate abs chansel math_function sharedfunction
 
@@ -657,10 +649,9 @@ relocatableinstruction:
 illegalinstruction:
    ILLEGAL execsize instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $1);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $2);
-      i965_asm_set_instruction_options(parser, $3);
+      struct predicate pred = { .pred_control = BRW_PREDICATE_NONE };
+      gen_inst *inst = gen_asm_next_inst(parser, $1);
+      apply_common_fields(parser, inst, &pred, NULL, &$3, $2, false);
       (void) yynerrs;
    }
    ;
@@ -669,33 +660,9 @@ illegalinstruction:
 unaryinstruction:
    predicate unaryopcodes saturate cond_mod execsize dst srcaccimm   instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_set_default_access_mode(p, $8.access_mode);
-      i965_asm_unary_instruction($2, p, $6, $7);
-      brw_pop_insn_state(p);
-      i965_asm_set_instruction_options(parser, $8);
-      if ($4.cond_modifier) {
-         brw_eu_inst_set_cond_modifier(p->devinfo,
-                                       brw_last_inst,
-                                       $4.cond_modifier);
-      }
-
-      if (!brw_eu_inst_flag_reg_nr(p->devinfo, brw_last_inst)) {
-         brw_eu_inst_set_flag_reg_nr(p->devinfo,
-                                     brw_last_inst,
-                                     $4.flag_reg_nr);
-         brw_eu_inst_set_flag_subreg_nr(p->devinfo,
-                                        brw_last_inst,
-                                        $4.flag_subreg_nr);
-      }
-
-      if ($7.file != IMM) {
-         brw_eu_inst_set_src0_vstride(p->devinfo, brw_last_inst,
-                                      $7.vstride);
-      }
-      brw_eu_inst_set_saturate(p->devinfo, brw_last_inst, $3);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $5);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $8.chan_offset);
+      gen_inst *inst = i965_asm_unary_instruction(parser, $2, $6, $7);
+      apply_common_fields(parser, inst, &$1, &$4, &$8, $5,
+                          $3 == BRW_INSTRUCTION_SATURATE);
    }
    ;
 
@@ -719,28 +686,9 @@ unaryopcodes:
 binaryinstruction:
    predicate binaryopcodes saturate cond_mod execsize dst srcimm srcimm instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_set_default_access_mode(p, $9.access_mode);
-      i965_asm_binary_instruction($2, p, $6, $7, $8);
-      i965_asm_set_instruction_options(parser, $9);
-      if ($4.cond_modifier) {
-         brw_eu_inst_set_cond_modifier(p->devinfo,
-                                       brw_last_inst,
-                                       $4.cond_modifier);
-      }
-
-      if (!brw_eu_inst_flag_reg_nr(p->devinfo, brw_last_inst)) {
-         brw_eu_inst_set_flag_reg_nr(p->devinfo, brw_last_inst,
-                                     $4.flag_reg_nr);
-         brw_eu_inst_set_flag_subreg_nr(p->devinfo, brw_last_inst,
-                                        $4.flag_subreg_nr);
-      }
-
-      brw_eu_inst_set_saturate(p->devinfo, brw_last_inst, $3);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $5);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $9.chan_offset);
-
-      brw_pop_insn_state(p);
+      gen_inst *inst = i965_asm_binary_instruction(parser, $2, $6, $7, $8);
+      apply_common_fields(parser, inst, &$1, &$4, &$9, $5,
+                          $3 == BRW_INSTRUCTION_SATURATE);
    }
    ;
 
@@ -766,29 +714,9 @@ binaryopcodes:
 binaryaccinstruction:
    predicate binaryaccopcodes saturate cond_mod execsize dst srcacc srcimm instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_set_default_access_mode(p, $9.access_mode);
-      i965_asm_binary_instruction($2, p, $6, $7, $8);
-      brw_pop_insn_state(p);
-      i965_asm_set_instruction_options(parser, $9);
-      if ($4.cond_modifier) {
-         brw_eu_inst_set_cond_modifier(p->devinfo,
-                                       brw_last_inst,
-                                       $4.cond_modifier);
-      }
-
-      if (!brw_eu_inst_flag_reg_nr(p->devinfo, brw_last_inst)) {
-         brw_eu_inst_set_flag_reg_nr(p->devinfo,
-                                     brw_last_inst,
-                                     $4.flag_reg_nr);
-         brw_eu_inst_set_flag_subreg_nr(p->devinfo,
-                                        brw_last_inst,
-                                        $4.flag_subreg_nr);
-      }
-
-      brw_eu_inst_set_saturate(p->devinfo, brw_last_inst, $3);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $5);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $9.chan_offset);
+      gen_inst *inst = i965_asm_binary_instruction(parser, $2, $6, $7, $8);
+      apply_common_fields(parser, inst, &$1, &$4, &$9, $5,
+                          $3 == BRW_INSTRUCTION_SATURATE);
    }
    ;
 
@@ -810,14 +738,13 @@ binaryaccopcodes:
 mathinstruction:
    predicate MATH saturate math_function execsize dst src srcimm instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_set_default_access_mode(p, $9.access_mode);
-      gfx6_math(p, $6, $4, $7, $8);
-      i965_asm_set_instruction_options(parser, $9);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $5);
-      brw_eu_inst_set_saturate(p->devinfo, brw_last_inst, $3);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $9.chan_offset);
-      brw_pop_insn_state(p);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->dst = $6;
+      inst->src[0] = $7;
+      inst->src[1] = $8;
+      inst->math.func = $4;
+      apply_common_fields(parser, inst, &$1, NULL, &$9, $5,
+                          $3 == BRW_INSTRUCTION_SATURATE);
    }
    ;
 
@@ -843,8 +770,9 @@ math_function:
 nopinstruction:
    NOP
    {
-      struct brw_codegen *p = parser->p;
-      brw_NOP(p);
+      struct predicate pred = { .pred_control = BRW_PREDICATE_NONE };
+      gen_inst *inst = gen_asm_next_inst(parser, $1);
+      apply_common_fields(parser, inst, &pred, NULL, &(struct options){0}, 1, false);
    }
    ;
 
@@ -852,48 +780,25 @@ nopinstruction:
 ternaryinstruction:
    predicate ternaryopcodes saturate cond_mod execsize dst srcimm src srcimm instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_set_default_access_mode(p, $10.access_mode);
-      i965_asm_ternary_instruction($2, p, $6, $7, $8, $9);
-      brw_pop_insn_state(p);
-      i965_asm_set_instruction_options(parser, $10);
-      if ($4.cond_modifier) {
-         brw_eu_inst_set_cond_modifier(p->devinfo,
-                                       brw_last_inst,
-                                       $4.cond_modifier);
-      }
-
-      if (p->devinfo->ver < 12) {
-         brw_eu_inst_set_3src_a16_flag_reg_nr(p->devinfo, brw_last_inst,
-                                              $4.flag_reg_nr);
-         brw_eu_inst_set_3src_a16_flag_subreg_nr(p->devinfo, brw_last_inst,
-                                                 $4.flag_subreg_nr);
-      }
-
-      brw_eu_inst_set_saturate(p->devinfo, brw_last_inst, $3);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $5);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $10.chan_offset);
+      gen_inst *inst = i965_asm_ternary_instruction(parser, $2, $6, $7, $8, $9);
+      apply_common_fields(parser, inst, &$1, &$4, &$10, $5,
+                          $3 == BRW_INSTRUCTION_SATURATE);
    }
    |
    predicate DPAS DPAS_PARAMS saturate cond_mod execsize dst src src src instoptions
    {
-      struct brw_codegen *p = parser->p;
-      assert(p->devinfo->verx10 >= 125);
-
-      brw_set_default_access_mode(p, $11.access_mode);
-
-      brw_DPAS(p, translate_systolic_depth($3.sdepth), $3.rcount, $7, $8, $9, $10);
-      brw_pop_insn_state(p);
-      i965_asm_set_instruction_options(parser, $11);
-      if ($5.cond_modifier) {
-         brw_eu_inst_set_cond_modifier(p->devinfo,
-                                       brw_last_inst,
-                                       $5.cond_modifier);
-      }
-
-      brw_eu_inst_set_saturate(p->devinfo, brw_last_inst, $4);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $6);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $11.chan_offset);
+      assert(parser->devinfo->verx10 >= 125);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->dst = $7;
+      inst->src[0] = $8;
+      inst->src[1] = $9;
+      inst->src[2] = $10;
+      inst->dpas.sdepth = translate_systolic_depth($3.sdepth);
+      inst->dpas.rcount = $3.rcount;
+      inst->dpas.src1_subbyte = BRW_SUB_BYTE_PRECISION_NONE;
+      inst->dpas.src2_subbyte = BRW_SUB_BYTE_PRECISION_NONE;
+      apply_common_fields(parser, inst, &$1, &$5, &$11, $6,
+                          $4 == BRW_INSTRUCTION_SATURATE);
    }
    ;
 
@@ -911,19 +816,16 @@ ternaryopcodes:
 waitinstruction:
    WAIT execsize dst instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $1);
-      i965_asm_set_instruction_options(parser, $4);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $2);
-      brw_set_default_access_mode(p, $4.access_mode);
-      struct brw_reg dest = $3;
+      struct predicate pred = { .pred_control = BRW_PREDICATE_NONE };
+      gen_operand dest = $3;
       dest.swizzle = brw_swizzle_for_mask(dest.writemask);
-      if (dest.file != ARF || dest.nr != BRW_ARF_NOTIFICATION_COUNT)
+      if (dest.file != GEN_ARF || dest.nr != BRW_ARF_NOTIFICATION_COUNT)
          error(&@1, "WAIT must use the notification register\n");
-      brw_set_dest(p, brw_last_inst, dest);
-      brw_set_src0(p, brw_last_inst, dest);
-      brw_set_src1(p, brw_last_inst, brw_null_reg());
-      brw_eu_inst_set_mask_control(p->devinfo, brw_last_inst, BRW_MASK_DISABLE);
+      gen_inst *inst = gen_asm_next_inst(parser, $1);
+      inst->dst = dest;
+      inst->src[0] = dest;
+      inst->src[1] = brw_null_reg();
+      apply_common_fields(parser, inst, &pred, NULL, &$4, $2, false);
    }
    ;
 
@@ -931,115 +833,99 @@ waitinstruction:
 sendinstruction:
    predicate sendopcode execsize dst payload exp2 sharedfunction msgdesc instoptions
    {
-      struct brw_codegen *p = parser->p;
+      assert(parser->devinfo->ver < 12);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->dst = $4;
+      inst->src[0] = $5;
+      inst->src[1] = brw_null_reg();
 
-      i965_asm_set_instruction_options(parser, $9);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-      brw_set_dest(p, brw_last_inst, $4);
-      brw_set_src0(p, brw_last_inst, $5);
-      brw_eu_inst_set_bits(brw_last_inst, 127, 96, $6);
-      brw_eu_inst_set_src1_file_type(p->devinfo, brw_last_inst,
-                                     IMM, BRW_TYPE_UD);
-      brw_eu_inst_set_sfid(p->devinfo, brw_last_inst, $7);
-      brw_eu_inst_set_eot(p->devinfo, brw_last_inst, $9.end_of_thread);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $9.chan_offset);
-
-      brw_pop_insn_state(p);
+      inst->send.desc_imm = ((uint32_t)$6) & 0x7fffffff;
+      inst->send.desc_is_reg = false;
+      inst->send.ex_desc_is_reg = false;
+      inst->send.sfid = $7;
+      inst->send.eot = $9.end_of_thread;
+      apply_common_fields(parser, inst, &$1, NULL, &$9, $3, false);
    }
    | predicate sendopcode execsize dst payload payload exp2 sharedfunction msgdesc instoptions
    {
-      struct brw_codegen *p = parser->p;
-      assert(p->devinfo->ver < 12);
+      assert(parser->devinfo->ver < 12);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->dst = $4;
+      inst->src[0] = $5;
+      inst->src[1] = brw_null_reg();
 
-      i965_asm_set_instruction_options(parser, $10);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-      brw_set_dest(p, brw_last_inst, $4);
-      brw_set_src0(p, brw_last_inst, $5);
-      if ($6.file != ARF &&
-          $6.nr != BRW_ARF_ADDRESS &&
-          $6.subnr != 0) {
+      if ($6.file != GEN_ARF ||
+          $6.nr != BRW_ARF_ADDRESS ||
+          $6.subnr != 0)
          error(&@2, "SEND with indirect desc must use a0.0\n");
-      }
-      brw_eu_inst_set_send_sel_reg32_desc(p->devinfo, brw_last_inst, 1);
-      brw_eu_inst_set_bits(brw_last_inst, 127, 96, $7);
-      brw_eu_inst_set_sfid(p->devinfo, brw_last_inst, $8);
-      brw_eu_inst_set_eot(p->devinfo, brw_last_inst, $10.end_of_thread);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $10.chan_offset);
-
-      brw_pop_insn_state(p);
+      inst->send.desc_is_reg = true;
+      inst->send.ex_desc_is_reg = false;
+      inst->send.sfid = $8;
+      inst->send.eot = $10.end_of_thread;
+      apply_common_fields(parser, inst, &$1, NULL, &$10, $3, false);
    }
    | predicate sendsopcode execsize dst payload payload desc ex_desc sharedfunction msgdesc instoptions
    {
-      struct brw_codegen *p = parser->p;
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->dst = $4;
+      inst->src[0] = $5;
+      inst->src[1] = $6;
 
-      i965_asm_set_instruction_options(parser, $11);
-      brw_eu_inst_set_exec_size(parser->devinfo, brw_last_inst, $3);
-      brw_set_dest(p, brw_last_inst, $4);
-      brw_set_src0(p, brw_last_inst, $5);
-      brw_set_src1(p, brw_last_inst, $6);
-
-      if ($7.file == IMM) {
-         brw_eu_inst_set_send_sel_reg32_desc(p->devinfo, brw_last_inst, 0);
-         brw_eu_inst_set_send_desc(p->devinfo, brw_last_inst, $7.ud);
+      if ($7.file == GEN_IMM) {
+         inst->send.desc_is_reg = false;
+         inst->send.desc_imm = $7.imm & 0x7fffffff;
       } else {
-         brw_eu_inst_set_send_sel_reg32_desc(p->devinfo, brw_last_inst, 1);
+         inst->send.desc_is_reg = true;
       }
 
-      if ($8.file == IMM) {
-         brw_eu_inst_set_send_sel_reg32_ex_desc(p->devinfo, brw_last_inst, 0);
-         brw_eu_inst_set_sends_ex_desc(p->devinfo, brw_last_inst, $8.ud, false);
+      if ($8.file == GEN_IMM) {
+         inst->send.ex_desc_is_reg = false;
+         inst->send.ex_desc_imm = $8.imm;
       } else {
-         brw_eu_inst_set_send_sel_reg32_ex_desc(p->devinfo, brw_last_inst, 1);
-         brw_eu_inst_set_send_ex_desc_ia_subreg_nr(p->devinfo, brw_last_inst, $8.subnr >> 2);
+         inst->send.ex_desc_is_reg = true;
+         inst->send.ex_desc_subnr = $8.subnr;
       }
 
-      brw_eu_inst_set_sfid(p->devinfo, brw_last_inst, $9);
-      brw_eu_inst_set_eot(p->devinfo, brw_last_inst, $11.end_of_thread);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $11.chan_offset);
+      inst->send.sfid = $9;
+      inst->send.eot = $11.end_of_thread;
 
-      if (p->devinfo->verx10 >= 125 && $10.ex_bso) {
-         brw_eu_inst_set_send_ex_bso(p->devinfo, brw_last_inst, 1);
-         brw_eu_inst_set_send_src1_len(p->devinfo, brw_last_inst, $10.src1_len);
+      if (parser->devinfo->verx10 >= 125 && $10.ex_bso) {
+         inst->send.ex_bso = true;
+         inst->send.src1_len = $10.src1_len;
       }
 
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$11, $3, false);
    }
    | predicate sendsopcode execsize dst GENREGFILE LSQUARE scalarreg RSQUARE desc ex_desc sharedfunction msgdesc instoptions
    {
-      struct brw_codegen *p = parser->p;
-      assert(p->devinfo->ver >= 30);
+      assert(parser->devinfo->ver >= 30);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->dst = $4;
+      inst->src[0] = $7;
+      inst->src[1] = brw_null_reg();
 
-      i965_asm_set_instruction_options(parser, $13);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-      brw_set_dest(p, brw_last_inst, $4);
-      brw_set_src0(p, brw_last_inst, $7);
-      brw_set_src1(p, brw_last_inst, brw_null_reg());
-
-      if ($9.file == IMM) {
-         brw_eu_inst_set_send_sel_reg32_desc(p->devinfo, brw_last_inst, 0);
-         brw_eu_inst_set_send_desc(p->devinfo, brw_last_inst, $9.ud);
+      if ($9.file == GEN_IMM) {
+         inst->send.desc_is_reg = false;
+         inst->send.desc_imm = $9.imm & 0x7fffffff;
       } else {
-         brw_eu_inst_set_send_sel_reg32_desc(p->devinfo, brw_last_inst, 1);
+         inst->send.desc_is_reg = true;
       }
 
-      if ($10.file == IMM) {
-         brw_eu_inst_set_send_sel_reg32_ex_desc(p->devinfo, brw_last_inst, 0);
-         brw_eu_inst_set_sends_ex_desc(p->devinfo, brw_last_inst, $10.ud, true);
+      if ($10.file == GEN_IMM) {
+         inst->send.ex_desc_is_reg = false;
+         inst->send.ex_desc_imm = $10.imm;
       } else {
-         brw_eu_inst_set_send_sel_reg32_ex_desc(p->devinfo, brw_last_inst, 1);
-         brw_eu_inst_set_send_ex_desc_ia_subreg_nr(p->devinfo, brw_last_inst, $10.subnr >> 2);
+         inst->send.ex_desc_is_reg = true;
+         inst->send.ex_desc_subnr = $10.subnr;
       }
 
-      brw_eu_inst_set_sfid(p->devinfo, brw_last_inst, $11);
-      brw_eu_inst_set_eot(p->devinfo, brw_last_inst, $13.end_of_thread);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $13.chan_offset);
+      inst->send.sfid = $11;
+      inst->send.eot = $13.end_of_thread;
 
-      if ($12.ex_bso) {
-         brw_eu_inst_set_send_ex_bso(p->devinfo, brw_last_inst, 1);
-         /* Not settings src1 length, as its implied zero. */
-      }
+      if ($12.ex_bso)
+         inst->send.ex_bso = true;
 
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$13, $3, false);
    }
    ;
 
@@ -1056,11 +942,11 @@ sendsop:
    ;
 
 sendopcode:
-   sendop   { $$ = brw_next_insn(parser->p, $1); }
+   sendop   { $$ = $1; }
    ;
 
 sendsopcode:
-   sendsop  { $$ = brw_next_insn(parser->p, $1); }
+   sendsop  { $$ = $1; }
    ;
 
 sharedfunction:
@@ -1090,7 +976,7 @@ desc:
    reg32a
    | exp2
    {
-      $$ = brw_imm_ud($1);
+      $$ = asm_make_imm_operand(BRW_TYPE_UD, $1);
    }
    ;
 
@@ -1098,15 +984,15 @@ ex_desc:
    reg32a
    | exp2
    {
-      $$ = brw_imm_ud($1);
+      $$ = asm_make_imm_operand(BRW_TYPE_UD, $1);
    }
    ;
 
 reg32a:
    addrreg region reg_type
    {
-      $$ = set_direct_src_operand(&$1, $3);
-      $$ = stride($$, $2.vstride, $2.width, $2.hstride);
+      $$ = asm_make_direct_operand($1, $3, $2, BRW_SWIZZLE_NOOP,
+                                   WRITEMASK_XYZW, false, false);
    }
    ;
 
@@ -1115,16 +1001,9 @@ reg32a:
 jumpinstruction:
    predicate JMPI execsize relativelocation2 instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
-      i965_asm_set_instruction_options(parser, $5);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-      brw_set_dest(p, brw_last_inst, brw_ip_reg());
-      brw_set_src0(p, brw_last_inst, brw_ip_reg());
-      brw_set_src1(p, brw_last_inst, $4);
-      brw_eu_inst_set_pred_control(p->devinfo, brw_last_inst,
-                                   brw_eu_inst_pred_control(p->devinfo, brw_last_inst));
-      brw_pop_insn_state(p);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->src[0] = $4;
+      apply_common_fields(parser, inst, &$1, NULL, &$5, $3, false);
    }
    ;
 
@@ -1132,144 +1011,98 @@ jumpinstruction:
 branchinstruction:
    predicate ENDIF execsize JIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
-      brw_eu_inst_set_unused_uip(p->devinfo, brw_last_inst);
-      i965_asm_set_instruction_options(parser, $6);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$6, $3, false);
    }
    | ELSE execsize JIP JUMP_LABEL UIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $1);
+      struct predicate pred = { .pred_control = BRW_PREDICATE_NONE };
+      gen_inst *inst = gen_asm_next_inst(parser, $1);
       brw_asm_label_use_jip(parser, $4);
       brw_asm_label_use_uip(parser, $6);
-      i965_asm_set_instruction_options(parser, $7);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $2);
+      apply_common_fields(parser, inst, &pred, NULL, &$7, $2, false);
    }
    | predicate IF execsize JIP JUMP_LABEL UIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
-      i965_asm_set_instruction_options(parser, $8);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
       brw_asm_label_use_uip(parser, $7);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$8, $3, false);
    }
    | predicate GOTO execsize JIP JUMP_LABEL UIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
       brw_asm_label_use_uip(parser, $7);
-      i965_asm_set_instruction_options(parser, $8);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$8, $3, false);
    }
    ;
 
 joininstruction:
    predicate JOIN execsize JIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
-      brw_eu_inst_set_unused_uip(p->devinfo, brw_last_inst);
-      i965_asm_set_instruction_options(parser, $6);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$6, $3, false);
    }
    ;
 
-/* break instruction */
 breakinstruction:
    predicate BREAK execsize JIP JUMP_LABEL UIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
       brw_asm_label_use_uip(parser, $7);
-      i965_asm_set_instruction_options(parser, $8);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$8, $3, false);
    }
    | predicate HALT execsize JIP JUMP_LABEL UIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
       brw_asm_label_use_uip(parser, $7);
-      i965_asm_set_instruction_options(parser, $8);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$8, $3, false);
    }
    | predicate CONT execsize JIP JUMP_LABEL UIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
       brw_asm_label_use_uip(parser, $7);
-      i965_asm_set_instruction_options(parser, $8);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$8, $3, false);
    }
    ;
 
-/* loop instruction */
 loopinstruction:
    predicate WHILE execsize JIP JUMP_LABEL instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $2);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
       brw_asm_label_use_jip(parser, $5);
-      brw_eu_inst_set_unused_uip(p->devinfo, brw_last_inst);
-      i965_asm_set_instruction_options(parser, $6);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $3);
-
-      brw_pop_insn_state(p);
+      apply_common_fields(parser, inst, &$1, NULL, &$6, $3, false);
    }
    | DO execsize instoptions
    {
-      struct brw_codegen *p = parser->p;
-      brw_next_insn(p, $1);
+      struct predicate pred = { .pred_control = BRW_PREDICATE_NONE };
+      gen_inst *inst = gen_asm_next_inst(parser, $1);
+      apply_common_fields(parser, inst, &pred, NULL, &$3, $2, false);
    }
    ;
 
-/* sync instruction */
 syncinstruction:
    predicate SYNC sync_function execsize sync_arg instoptions
    {
-      struct brw_codegen *p = parser->p;
-      if (p->devinfo->ver < 12) {
+      if (parser->devinfo->ver < 12)
          error(&@2, "sync instruction is supported only on gfx12+\n");
-      }
 
-      if ($5.file == IMM &&
+      if ($5.file == GEN_IMM &&
           $3 != TGL_SYNC_ALLRD &&
           $3 != TGL_SYNC_ALLWR) {
          error(&@2, "Only allrd and allwr support immediate argument\n");
       }
 
-      brw_set_default_access_mode(p, $6.access_mode);
-      brw_SYNC(p, $3);
-      i965_asm_set_instruction_options(parser, $6);
-      brw_eu_inst_set_exec_size(p->devinfo, brw_last_inst, $4);
-      brw_set_src0(p, brw_last_inst, $5);
-      brw_eu_inst_set_eot(p->devinfo, brw_last_inst, $6.end_of_thread);
-      brw_eu_inst_set_group(p->devinfo, brw_last_inst, $6.chan_offset);
-
-      brw_pop_insn_state(p);
+      gen_inst *inst = gen_asm_next_inst(parser, $2);
+      inst->sync.func = $3;
+      inst->src[0] = $5;
+      apply_common_fields(parser, inst, &$1, NULL, &$6, $4, false);
    }
    ;
 
@@ -1285,11 +1118,8 @@ sync_function:
 sync_arg:
    nullreg region reg_type
    {
-      $$ = $1;
-      $$.vstride = $2.vstride;
-      $$.width = $2.width;
-      $$.hstride = $2.hstride;
-      $$.type = $3;
+      $$ = asm_make_direct_operand($1, $3, $2, BRW_SWIZZLE_NOOP,
+                                   WRITEMASK_XYZW, false, false);
    }
    | immreg
    ;
@@ -1316,25 +1146,23 @@ dst:
 dstoperand:
    dstreg dstregion writemask reg_type
    {
-      $$ = $1;
-      $$.vstride = BRW_VERTICAL_STRIDE_1;
-      $$.width = BRW_WIDTH_1;
-      $$.hstride = $2;
-      $$.type = $4;
-      $$.writemask = $3;
-      $$.swizzle = BRW_SWIZZLE_NOOP;
-      $$.subnr = $$.subnr * brw_type_size_bytes($4);
+      gen_operand o = $1;
+      o.region = asm_make_region(1, 1, $2);
+      o.type = $4;
+      o.writemask = $3;
+      o.swizzle = BRW_SWIZZLE_NOOP;
+      $$ = asm_finalize_operand(o);
    }
    ;
 
 dstoperandex:
    dstoperandex_typed dstregion writemask reg_type
    {
-      $$ = $1;
-      $$.hstride = $2;
-      $$.type = $4;
-      $$.writemask = $3;
-      $$.subnr = $$.subnr * brw_type_size_bytes($4);
+      gen_operand o = $1;
+      o.region = asm_make_region(1, 1, $2);
+      o.type = $4;
+      o.writemask = $3;
+      $$ = asm_finalize_operand(o);
    }
    /* BSpec says "When the conditional modifier is present, updates
     * to the selected flag register also occur. In this case, the
@@ -1342,18 +1170,18 @@ dstoperandex:
     */
    | nullreg dstregion writemask reg_type
    {
-      $$ = $1;
-      $$.vstride = BRW_VERTICAL_STRIDE_1;
-      $$.width = BRW_WIDTH_1;
-      $$.hstride = $2;
-      $$.writemask = $3;
-      $$.type = $4;
+      gen_operand o = $1;
+      o.region = asm_make_region(1, 1, $2);
+      o.type = $4;
+      o.writemask = $3;
+      $$ = asm_finalize_operand(o);
    }
    | threadcontrolreg
    {
-      $$ = $1;
-      $$.hstride = 1;
-      $$.type = BRW_TYPE_UW;
+      gen_operand o = $1;
+      o.region = asm_make_region(1, 1, 1);
+      o.type = BRW_TYPE_UW;
+      $$ = asm_finalize_operand(o);
    }
    ;
 
@@ -1375,12 +1203,11 @@ dstreg:
    directgenreg
    {
       $$ = $1;
-      $$.address_mode = BRW_ADDRESS_DIRECT;
    }
    | indirectgenreg
    {
       $$ = $1;
-      $$.address_mode = BRW_ADDRESS_REGISTER_INDIRECT_REGISTER;
+      $$.indirect = true;
    }
    ;
 
@@ -1395,44 +1222,44 @@ immreg:
    {
       switch ($2) {
       case BRW_TYPE_UD:
-         $$ = brw_imm_ud($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_UD, (uint32_t)$1);
          break;
       case BRW_TYPE_D:
-         $$ = brw_imm_d($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_D, (uint64_t)(int32_t)$1);
          break;
       case BRW_TYPE_UW:
-         $$ = brw_imm_uw($1 | ($1 << 16));
+         $$ = asm_make_imm_operand(BRW_TYPE_UW,
+                                   (uint32_t)$1 | ((uint32_t)$1 << 16));
          break;
-      case BRW_TYPE_W:
-         $$ = brw_imm_w($1);
+      case BRW_TYPE_W: {
+         uint32_t packed = (uint16_t)$1 | ((uint32_t)(uint16_t)$1 << 16);
+         $$ = asm_make_imm_operand(BRW_TYPE_W, packed);
          break;
+      }
       case BRW_TYPE_F:
-         $$ = brw_imm_reg(BRW_TYPE_F);
-         /* Set u64 instead of ud since DIM uses a 64-bit F-typed imm */
-         $$.u64 = $1;
+         $$ = asm_make_imm_operand(BRW_TYPE_F, (uint64_t)$1);
          break;
       case BRW_TYPE_V:
-         $$ = brw_imm_v($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_V, (uint32_t)$1);
          break;
       case BRW_TYPE_UV:
-         $$ = brw_imm_uv($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_UV, (uint32_t)$1);
          break;
       case BRW_TYPE_VF:
-         $$ = brw_imm_vf($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_VF, (uint32_t)$1);
          break;
       case BRW_TYPE_Q:
-         $$ = brw_imm_q($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_Q, (uint64_t)(int64_t)$1);
          break;
       case BRW_TYPE_UQ:
-         $$ = brw_imm_uq($1);
+         $$ = asm_make_imm_operand(BRW_TYPE_UQ, (uint64_t)$1);
          break;
       case BRW_TYPE_DF:
-         $$ = brw_imm_reg(BRW_TYPE_DF);
-         $$.d64 = $1;
+         $$ = asm_make_imm_operand(BRW_TYPE_DF, (uint64_t)$1);
          break;
       case BRW_TYPE_HF:
-         $$ = brw_imm_reg(BRW_TYPE_HF);
-         $$.ud = $1 | ($1 << 16);
+         $$ = asm_make_imm_operand(BRW_TYPE_HF,
+                                   (uint32_t)$1 | ((uint32_t)$1 << 16));
          break;
       default:
          error(&@2, "Unknown immediate type %s\n",
@@ -1444,8 +1271,8 @@ immreg:
 reg32:
    directgenreg region reg_type
    {
-      $$ = set_direct_src_operand(&$1, $3);
-      $$ = stride($$, $2.vstride, $2.width, $2.hstride);
+      $$ = asm_make_direct_operand($1, $3, $2, BRW_SWIZZLE_NOOP,
+                                   WRITEMASK_XYZW, false, false);
    }
    ;
 
@@ -1473,40 +1300,27 @@ directsrcaccoperand:
    directsrcoperand
    | negate abs accreg region reg_type
    {
-      $$ = set_direct_src_operand(&$3, $5);
-      $$.negate = $1;
-      $$.abs = $2;
-      $$.vstride = $4.vstride;
-      $$.width = $4.width;
-      $$.hstride = $4.hstride;
+      $$ = asm_make_direct_operand($3, $5, $4, BRW_SWIZZLE_NOOP,
+                                   WRITEMASK_X, $1, $2);
    }
    ;
 
 srcarcoperandex:
    srcarcoperandex_typed region reg_type
    {
-      $$ = brw_make_reg($1.file,
-                        $1.nr,
-                        $1.subnr,
-                        0,
-                        0,
-                        $3,
-                        $2.vstride,
-                        $2.width,
-                        $2.hstride,
-                        BRW_SWIZZLE_NOOP,
-                        WRITEMASK_XYZW);
+      $$ = asm_make_direct_operand($1, $3, $2, BRW_SWIZZLE_NOOP,
+                                   WRITEMASK_XYZW, false, false);
    }
    | nullreg region reg_type
    {
-      $$ = set_direct_src_operand(&$1, $3);
-      $$.vstride = $2.vstride;
-      $$.width = $2.width;
-      $$.hstride = $2.hstride;
+      $$ = asm_make_direct_operand($1, $3, $2, BRW_SWIZZLE_NOOP,
+                                   WRITEMASK_XYZW, false, false);
    }
    | threadcontrolreg
    {
-      $$ = set_direct_src_operand(&$1, BRW_TYPE_UW);
+      $$ = asm_make_direct_operand($1, BRW_TYPE_UW, asm_make_region(0, 1, 0),
+                                   BRW_SWIZZLE_NOOP, WRITEMASK_XYZW,
+                                   false, false);
    }
    ;
 
@@ -1523,21 +1337,7 @@ srcarcoperandex_typed:
 indirectsrcoperand:
    negate abs indirectgenreg indirectregion swizzle reg_type
    {
-      $$ = brw_make_reg($3.file,
-                        0,
-                        $3.subnr,
-                        $1,  // negate
-                        $2,  // abs
-                        $6,
-                        $4.vstride,
-                        $4.width,
-                        $4.hstride,
-                        $5,
-                        WRITEMASK_X);
-
-      $$.address_mode = BRW_ADDRESS_REGISTER_INDIRECT_REGISTER;
-      // brw_reg set indirect_offset to 0 so set it to valid value
-      $$.indirect_offset = $3.indirect_offset;
+      $$ = asm_make_indirect_operand($3, $6, $4, $5, WRITEMASK_X, $1, $2);
    }
    ;
 
@@ -1551,17 +1351,7 @@ directgenreg_list:
 directsrcoperand:
    negate abs directgenreg_list region swizzle reg_type
    {
-      $$ = brw_make_reg($3.file,
-                        $3.nr,
-                        $3.subnr,
-                        $1,
-                        $2,
-                        $6,
-                        $4.vstride,
-                        $4.width,
-                        $4.hstride,
-                        $5,
-                        WRITEMASK_X);
+      $$ = asm_make_direct_operand($3, $6, $4, $5, WRITEMASK_X, $1, $2);
    }
    | srcarcoperandex
    ;
@@ -1570,9 +1360,8 @@ directsrcoperand:
 addrparam:
    addrreg exp
    {
-      memset(&$$, '\0', sizeof($$));
-      $$.subnr = $1.subnr;
-      $$.indirect_offset = $2;
+      $$ = $1;
+      $$.addr_imm = $2;
    }
    | addrreg
    ;
@@ -1591,20 +1380,15 @@ subregnum:
 directgenreg:
    GENREG subregnum
    {
-      memset(&$$, '\0', sizeof($$));
-      $$.file = FIXED_GRF;
-      $$.nr = $1 * reg_unit(parser->devinfo);
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_GRF, $1, $2);
    }
    ;
 
 indirectgenreg:
    GENREGFILE LSQUARE addrparam RSQUARE
    {
-      memset(&$$, '\0', sizeof($$));
-      $$.file = FIXED_GRF;
-      $$.subnr = $3.subnr;
-      $$.indirect_offset = $3.indirect_offset;
+      $$ = asm_make_base_reg(GEN_GRF, 0, $3.subnr);
+      $$.addr_imm = $3.addr_imm;
    }
    ;
 
@@ -1617,9 +1401,7 @@ addrreg:
          error(&@2, "Address sub register number %d"
                "out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_ADDRESS;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_ADDRESS, $2);
    }
    ;
 
@@ -1632,10 +1414,7 @@ accreg:
          error(&@1, "Accumulator register number %d"
                " out of range\n", $1);
 
-      memset(&$$, '\0', sizeof($$));
-      $$.file = ARF;
-      $$.nr = BRW_ARF_ACCUMULATOR + $1;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_ACCUMULATOR + $1, $2);
    }
    ;
 
@@ -1653,9 +1432,7 @@ flagreg:
          error(&@2, "Flag subregister number %d"
                " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_FLAG | $1;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_FLAG | $1, $2);
    }
    ;
 
@@ -1666,9 +1443,7 @@ maskreg:
          error(&@1, "Mask register number %d"
                " out of range\n", $1);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_MASK;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_MASK, $2);
    }
    ;
 
@@ -1680,9 +1455,7 @@ notifyreg:
          error(&@2, "Notification sub register number %d"
                " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_NOTIFICATION_COUNT;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_NOTIFICATION_COUNT, $2);
    }
    ;
 
@@ -1693,10 +1466,9 @@ scalarreg:
          error(&@2, "Scalar sub register number %d"
                     " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_SCALAR;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_SCALAR, $2);
    }
+   ;
 
 statereg:
    STATEREG subregnum
@@ -1709,9 +1481,7 @@ statereg:
          error(&@2, "State sub register number %d"
                " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_STATE;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_STATE, $2);
    }
    ;
 
@@ -1722,18 +1492,16 @@ controlreg:
          error(&@2, "control sub register number %d"
                " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_CONTROL;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_CONTROL, $2);
    }
    ;
 
 ipreg:
-   IPREG      { $$ = brw_ip_reg(); }
+   IPREG      { $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_IP, 0); }
    ;
 
 nullreg:
-   NULL_TOKEN    { $$ = brw_null_reg(); }
+   NULL_TOKEN    { $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_NULL, 0); }
    ;
 
 threadcontrolreg:
@@ -1743,9 +1511,7 @@ threadcontrolreg:
          error(&@2, "Thread control sub register number %d"
                " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_TDR;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_TDR, $2);
    }
    ;
 
@@ -1762,9 +1528,7 @@ performancereg:
          error(&@2, "Performance sub register number %d"
                " out of range\n", $2);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_TIMESTAMP;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_TIMESTAMP, $2);
    }
    ;
 
@@ -1775,9 +1539,7 @@ channelenablereg:
          error(&@1, "Channel enable register number %d"
                " out of range\n", $1);
 
-      $$.file = ARF;
-      $$.nr = BRW_ARF_MASK;
-      $$.subnr = $2;
+      $$ = asm_make_base_reg(GEN_ARF, BRW_ARF_MASK, $2);
    }
    ;
 
@@ -1797,14 +1559,14 @@ immval:
 dstregion:
    /* empty */
    {
-      $$ = BRW_HORIZONTAL_STRIDE_1;
+      $$ = 1;
    }
    | LANGLE exp RANGLE
    {
       if ($2 != 0 && ($2 > 4 || !isPowerofTwo($2)))
          error(&@2, "Invalid Horizontal stride %d\n", $2);
 
-      $$ = ffs($2);
+      $$ = $2;
    }
    ;
 
@@ -1816,14 +1578,14 @@ indirectregion:
 region:
    /* empty */
    {
-      $$ = stride($$, 0, 1, 0);
+      $$ = asm_make_region(0, 1, 0);
    }
    | LANGLE exp RANGLE
    {
       if ($2 != 0 && ($2 > 32 || !isPowerofTwo($2)))
          error(&@2, "Invalid VertStride %d\n", $2);
 
-      $$ = stride($$, $2, 1, 0);
+      $$ = asm_make_region($2, 1, 0);
    }
    | LANGLE exp COMMA exp COMMA exp RANGLE
    {
@@ -1838,7 +1600,7 @@ region:
          error(&@6, "Invalid Horizontal stride in"
                "  region_wh %d\n", $6);
 
-      $$ = stride($$, $2, $4, $6);
+      $$ = asm_make_region($2, $4, $6);
    }
    | LANGLE exp SEMICOLON exp COMMA exp RANGLE
    {
@@ -1852,7 +1614,7 @@ region:
          error(&@6, "Invalid Horizontal stride in"
                " region_wh %d\n", $6);
 
-      $$ = stride($$, $2, $4, $6);
+      $$ = asm_make_region($2, $4, $6);
    }
    | LANGLE VxH COMMA exp COMMA exp RANGLE
    {
@@ -1863,7 +1625,7 @@ region:
          error(&@6, "Invalid Horizontal stride in"
                " region_wh %d\n", $6);
 
-      $$ = brw_VxH_indirect(0, 0);
+      $$ = asm_make_region(BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL, $4, $6);
    }
    ;
 
@@ -1877,8 +1639,7 @@ region_wh:
          error(&@4, "Invalid Horizontal stride in"
                " region_wh %d\n", $4);
 
-      $$ = stride($$, 0, $2, $4);
-      $$.vstride = BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL;
+      $$ = asm_make_region(BRW_VERTICAL_STRIDE_ONE_DIMENSIONAL, $2, $4);
    }
    ;
 
@@ -1963,19 +1724,17 @@ chansel:
 predicate:
    /* empty */
    {
-      struct brw_codegen *p = parser->p;
-      brw_push_insn_state(p);
-      brw_set_default_predicate_control(p, BRW_PREDICATE_NONE);
-      brw_set_default_flag_reg(p, 0, 0);
-      brw_set_default_predicate_inverse(p, false);
+      $$.pred_control = BRW_PREDICATE_NONE;
+      $$.pred_inv = 0;
+      $$.flag_reg_nr = 0;
+      $$.flag_subreg_nr = 0;
    }
    | LPAREN predstate flagreg predctrl RPAREN
    {
-      struct brw_codegen *p = parser->p;
-      brw_push_insn_state(p);
-      brw_set_default_predicate_inverse(p, $2);
-      brw_set_default_flag_reg(p, $3.nr, $3.subnr);
-      brw_set_default_predicate_control(p, $4);
+      $$.pred_inv = $2;
+      $$.flag_reg_nr = $3.nr;
+      $$.flag_subreg_nr = $3.subnr;
+      $$.pred_control = $4;
    }
    ;
 
@@ -2080,14 +1839,14 @@ saturate:
 execsize:
    /* empty */ %prec EMPTYEXECSIZE
    {
-      $$ = 0;
+      $$ = 1;
    }
    | LPAREN exp2 RPAREN
    {
       if ($2 > 32 || !isPowerofTwo($2))
          error(&@2, "Invalid execution size %llu\n", $2);
 
-      $$ = cvt($2) - 1;
+      $$ = $2;
    }
    ;
 
