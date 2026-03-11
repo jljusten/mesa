@@ -133,6 +133,14 @@ static const struct debug_control_bitset debug_control[] = {
 };
 uint64_t intel_simd = 0;
 
+static const struct debug_control debug_gen_control[] = {
+   { "check",                   DEBUG_GEN_CHECK },
+   { "verbose",                 DEBUG_GEN_VERBOSE },
+   { "todo",                    DEBUG_GEN_TODO },
+   { NULL, 0 }
+};
+uint64_t intel_gen_debug = 0;
+
 static const struct debug_control simd_control[] = {
    { "fs8",    DEBUG_FS_SIMD8 },
    { "fs16",   DEBUG_FS_SIMD16 },
@@ -253,10 +261,25 @@ parse_debug_bitset(const char *env, const struct debug_control_bitset *tbl)
 }
 
 static void
+process_intel_gen_debug_variable_once(void)
+{
+   const char *env_var = os_get_option("INTEL_GEN_DEBUG");
+
+   if (env_var == NULL) {
+      /* no INTEL_GEN_DEBUG env-var => no-gen */
+      intel_gen_debug = DEBUG_GEN_NO_GEN;
+   } else {
+      intel_gen_debug = parse_debug_string(env_var, debug_gen_control);
+   }
+}
+
+static void
 process_intel_debug_variable_once(void)
 {
    BITSET_ZERO(intel_debug);
    parse_debug_bitset(os_get_option("INTEL_DEBUG"), debug_control);
+
+   process_intel_gen_debug_variable_once();
 
    intel_simd = parse_debug_string(os_get_option("INTEL_SIMD_DEBUG"), simd_control);
    intel_debug_batch_frame_start =

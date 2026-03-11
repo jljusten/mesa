@@ -742,6 +742,22 @@ Intel driver environment variables
       not require :envvar:`INTEL_FORCE_PROBE` for the device as soon
       as it is available.
 
+.. envvar:: INTEL_GEN_DEBUG
+
+   A comma-separated list of named flags, to control the Intel gen
+   module. If the INTEL_GEN_DEBUG env-var is set (to anything), then
+   the gen module will be enabled:
+
+   ``check``
+      provide extra validation in the gen module, and abort the
+      program if something invalid is found
+
+   ``verbose``
+      print extra debug information to stdout
+
+   ``todo``
+      print extra todo warnings to stdout
+
 .. envvar:: INTEL_MEASURE
 
    Collects GPU timestamps over common intervals, and generates a CSV report

@@ -121,6 +121,10 @@ enum intel_debug_flag {
 
 extern BITSET_WORD intel_debug[BITSET_WORDS(INTEL_DEBUG_MAX)];
 
+#define DEBUG_GEN_CHECK         (1ull << 0)
+#define DEBUG_GEN_VERBOSE       (1ull << 1)
+#define DEBUG_GEN_TODO          (1ull << 3)
+#define DEBUG_GEN_NO_GEN        (1ull << 2)
 
 /* Check if a debug flag is enabled by testing its bit position */
 #define INTEL_DEBUG(flag) unlikely(BITSET_TEST(intel_debug, (flag)))
@@ -136,6 +140,7 @@ extern BITSET_WORD intel_debug[BITSET_WORDS(INTEL_DEBUG_MAX)];
                                       INTEL_DEBUG(DEBUG_BVH_BLAS_IR_AS) || \
                                       INTEL_DEBUG(DEBUG_BVH_TLAS_IR_AS)))
 
+extern uint64_t intel_gen_debug;
 extern uint64_t intel_simd;
 extern uint32_t intel_debug_bkp_before_draw_count;
 extern uint32_t intel_debug_bkp_after_draw_count;
@@ -145,6 +150,7 @@ extern uint64_t intel_debug_batch_frame_start;
 extern uint64_t intel_debug_batch_frame_stop;
 extern uint32_t intel_shader_dump_filter;
 
+#define INTEL_GEN_DEBUG(flag) (!!(intel_gen_debug & (DEBUG_GEN_ ## flag)))
 #define INTEL_SIMD(type, size)        (!!(intel_simd & (DEBUG_ ## type ## _SIMD ## size)))
 
 /* VS, TCS, TES and GS stages are dispatched in one size */
