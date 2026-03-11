@@ -2241,6 +2241,33 @@ print_disasm(FILE *fp, const struct brw_isa_info *isa,
 }
 
 bool
+uncompacted_insts_match(const struct brw_isa_info *isa,
+                        const void *fst,
+                        const void *snd)
+{
+   auto a = gen_as_raw_inst(isa->devinfo, fst);
+   auto ac = gen_as_raw_compact_inst(isa->devinfo, fst);
+   auto b = gen_as_raw_inst(isa->devinfo, snd);
+   auto bc = gen_as_raw_compact_inst(isa->devinfo, snd);
+
+   gen_raw_inst au, bu;
+   if (a) {
+      au = *a;
+   } else {
+      brw_uncompact_instruction(isa, (brw_eu_inst*)&au,
+                                (brw_eu_compact_inst*)ac);
+   }
+   if (b) {
+      bu = *b;
+   } else {
+      brw_uncompact_instruction(isa, (brw_eu_inst*)&bu,
+                                (brw_eu_compact_inst*)bc);
+   }
+
+   return memcmp(&au, &bu, sizeof(au)) == 0;
+}
+
+bool
 diff_insts(const struct brw_isa_info *isa,
            const void *original,
            const void *encoded)

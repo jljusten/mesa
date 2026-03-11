@@ -141,3 +141,8 @@ private:
 
 
 bool gen_finish_structured_cf(gen_inst **insts, int num_insts);
+
+bool
+uncompacted_insts_match(const struct brw_isa_info *isa,
+                        const void *fst,
+                        const void *snd);
