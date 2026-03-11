@@ -1540,6 +1540,12 @@ brw_generator::get_assembly()
    const unsigned *result_gen = gen.get_assembly();
    assert(result_gen);
 
+   if (!INTEL_GEN_DEBUG(VERBOSE) && !INTEL_GEN_DEBUG(CHECK)) {
+      /* We are using gen module's prog_data */
+      *prog_data = *gen.prog_data;
+      return result_gen;
+   }
+
    if (result_gen) {
       if (gen.prog_data->program_size != prog_data->program_size) {
          fprintf(stderr, "\n\n\n##################################################\n");
@@ -1588,7 +1594,9 @@ brw_generator::get_assembly()
       }
    }
 
-   return result;
+   /* We are using gen module's prog_data */
+   *prog_data = *gen.prog_data;
+   return result_gen;
 }
 
 void brw_prog_data_init(struct brw_stage_prog_data *prog_data,
