@@ -72,6 +72,11 @@ typedef struct gen_encode_params {
 
 bool gen_encode(gen_encode_params *params);
 
+const gen_raw_inst*
+gen_as_raw_inst(const struct intel_device_info *devinfo, const void *p);
+
+const gen_raw_compact_inst*
+gen_as_raw_compact_inst(const struct intel_device_info *devinfo, const void *p);
 
 typedef struct gen_decode_params {
    const struct intel_device_info *devinfo;
