@@ -4,6 +4,7 @@
  */
 
 #include <array>
+#include <vector>
 #include <stdio.h>
 #include <string.h>
 
@@ -474,6 +475,12 @@ struct gen_encoder {
          encode(params->insts[i], raw + i);
 
       params->raw_bytes_size = params->num_insts * sizeof(gen_raw_inst);
+
+      if (params->errors != NULL)
+         return false;
+
+      gen_compact(params);
+
       return true;
    }
 
