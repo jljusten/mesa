@@ -3,6 +3,7 @@
 
 libintel_compiler_gen_files = files(
   'gen.h',
+  'gen_compact.cpp',
   'gen_control_flow.cpp',
   'gen_print.cpp',
   'gen_private.h',
