@@ -1766,17 +1766,58 @@ brw_generator::generate_code(const brw_shader &s,
                  "\n"
                  "INSTRUCTION MISMATCH\n"
                  "\n");
-         // TODO(COMPACT): Improve diff logic below to account for compacted
-         // instructions.  See the loop we do in decoder.
-         assert(!compact);
 
-         for (int i = 0; i < limit; i++) {
-            if (diff_insts(&compiler->isa, &old_code[i], &gen_code[i], i)) {
-               fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", i * 16);
-               if (size_mismatch)
-                  break;
+         void *a, *b;
+         brw_eu_inst *au, *bu;
+         brw_eu_compact_inst *ac, *bc;
+         unsigned ai = 0, bi = 0, matched_count = 0;
+         size_t a_size = limit; // prog_data->program_size - prog_data->const_data_size;
+         size_t b_size = limit; // gen.prog_data->program_size - gen.prog_data->const_data_size;
+         bool mismatch = false;
+         do {
+            a = ai < a_size ?
+               (brw_eu_inst*)(((uint8_t*)old_code) + ai) : NULL;
+            au = NULL;
+            ac = NULL;
+            b = bi < b_size ?
+               (brw_eu_inst*)(((uint8_t*)gen_code) + bi) : NULL;
+            bu = NULL;
+            bc = NULL;
+            if (!a && !b) {
+               break;
             }
-         }
+            if (!a || !b) {
+               mismatch = true;
+               break;
+            }
+
+            if (a && brw_eu_inst_cmpt_control(p->devinfo, (brw_eu_inst*)a)) {
+               ac = (brw_eu_compact_inst*) a;
+            } else {
+               au = (brw_eu_inst*) a;
+            }
+            if (b && brw_eu_inst_cmpt_control(p->devinfo, (brw_eu_inst*)b)) {
+               bc = (brw_eu_compact_inst*) b;
+            } else {
+               bu = (brw_eu_inst*) b;
+            }
+
+            if (au && bu) {
+               mismatch = memcmp(au, bu, sizeof(*au)) != 0;
+            } else if (ac && bc) {
+               mismatch = memcmp(ac, bc, sizeof(*ac)) != 0;
+            } else {
+               mismatch = true;
+            }
+            if (mismatch)
+               break;
+
+            matched_count++;
+            ai += au ? 16 : 8;
+            bi += bu ? 16 : 8;
+         } while (true);
+         if (mismatch)
+            diff_insts(&compiler->isa, a, b, matched_count);
       }
 
       if (size_mismatch || data_mismatch)
