@@ -1349,8 +1349,7 @@ brw_generator::generate_code(const brw_shader &s,
 
    int before_size = p->next_insn_offset - start_offset;
 
-   // TODO: FIXME.
-   // brw_compact_instructions(p, start_offset, disasm_info);
+   brw_compact_instructions(p, start_offset, disasm_info);
 
    int after_size = p->next_insn_offset - start_offset;
 
