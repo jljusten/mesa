@@ -1536,6 +1536,9 @@ brw_generator::get_assembly()
 
    const unsigned *result = brw_get_program(p, &prog_data->program_size);
 
+   if (INTEL_GEN_DEBUG(NO_GEN))
+      return result;
+
    const unsigned *result_gen = gen.get_assembly();
    assert(result_gen);
 
@@ -1545,53 +1548,76 @@ brw_generator::get_assembly()
       return result_gen;
    }
 
+   brw_eu_inst *a, *b;
+   brw_eu_compact_inst *ac, *bc;
+   unsigned ai = 0, bi = 0, matched_count = 0;
+   bool mismatch = false;
    if (result_gen) {
-      if (gen.prog_data->program_size != prog_data->program_size) {
-         fprintf(stderr, "\n\n\n##################################################\n");
-         fprintf(stderr, "##################################################\n");
-         fprintf(stderr, "##################################################\n");
-         fprintf(stderr, "##################################################\n");
-         fprintf(stderr, "size mismatch: original  %u   new %u\n", prog_data->program_size, gen.prog_data->program_size);
-         assert(prog_data->program_size > gen.prog_data->program_size);
+      do {
+         a = ai < prog_data->program_size ?
+            (brw_eu_inst*)(((uint8_t*)result) + ai) : NULL;
+         ac = NULL;
+         b = bi < gen.prog_data->program_size ?
+            (brw_eu_inst*)(((uint8_t*)result_gen) + bi) : NULL;
+         bc = NULL;
+         if (!a && !b) {
+            break;
+         }
 
-         for (unsigned i = 0; i < prog_data->program_size / 16; i++) {
-            auto *a = ((brw_eu_inst *)result) + i;
-            auto *b = ((brw_eu_inst *)result_gen) + i;
-
-            if (brw_eu_inst_opcode(&compiler->isa, a) != brw_eu_inst_opcode(&compiler->isa, b)) {
-               fprintf(stderr, "\nfirst mismatch = %d (0x%x)\n\n", i, i * 16);
-               brw_disassemble_inst(stderr, &compiler->isa, a, false, 0, NULL);
-               brw_disassemble_inst(stderr, &compiler->isa, b, false, 0, NULL);
-               fprintf(stderr, "\n\n\n");
-               break;
+         if (a && brw_eu_inst_cmpt_control(p->devinfo, a)) {
+            ac = (brw_eu_compact_inst*) a;
+            a = NULL;
+         }
+         if (b) {
+            if (brw_eu_inst_cmpt_control(p->devinfo, b)) {
+               bc = (brw_eu_compact_inst*) b;
+               b = NULL;
             }
          }
 
-      } else {
-         bool failed = false;
-         for (unsigned i = 0; i < prog_data->program_size / 16; i++) {
-            if (diff_insts(&compiler->isa, ((gen_raw_inst *)result) + i, ((gen_raw_inst *)result_gen) + i)) {
-               fprintf(stderr, "\nFINAL PASS ERROR AT: 0x%x\n", i * 16);
-               failed = true;
-               break;
-            }
+         if (a && b) {
+            mismatch = a->data[0] != b->data[0] || a->data[1] != b->data[1];
+         } else if (ac && bc) {
+            mismatch = ac->data != bc->data;
+         } else {
+            mismatch = true;
          }
+         if (mismatch)
+            break;
 
-         if (failed) {
-
-            // for (unsigned i = 0; i < prog_data->program_size / 16; i++) {
-            //    auto *a = ((brw_eu_inst *)result) + i;
-            //    auto *b = ((brw_eu_inst *)result2) + i;
-            //
-            //    brw_disassemble_inst(stderr, &compiler->isa, a, false, 0, NULL);
-            //    brw_disassemble_inst(stderr, &compiler->isa, b, false, 0, NULL);
-            //    fprintf(stderr, "\n");
-            // }
-
-            abort();
-         }
-      }
+         matched_count++;
+         assert(a || ac);
+         ai += a ? 16 : 8;
+         assert(b || bc);
+         bi += b ? 16 : 8;
+      } while (true);
    }
+
+   if (!mismatch) {
+      /* We are using gen module's prog_data */
+      *prog_data = *gen.prog_data;
+      return result_gen;
+   }
+
+   if (INTEL_GEN_DEBUG(VERBOSE) || INTEL_GEN_DEBUG(CHECK)) {
+      printf("\n\n\n"
+             "##################################################\n"
+             "##################################################\n"
+             "##################################################\n"
+             "##################################################\n");
+
+      if (prog_data->program_size != gen.prog_data->program_size)
+         printf("size mismatch: original  %u   new %u\n",
+                 prog_data->program_size, gen.prog_data->program_size);
+
+      printf("\nfirst mismatch = %d (0x%x)\n\n", matched_count, ai);
+
+      diff_insts(&compiler->isa, a ? (void*)a : (void*)ac,
+                 b ? (void*)b : (void*)bc);
+   }
+
+   if (INTEL_GEN_DEBUG(CHECK))
+      abort();
 
    /* We are using gen module's prog_data */
    *prog_data = *gen.prog_data;
