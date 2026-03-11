@@ -20,7 +20,15 @@
 #include "util/mesa-sha1.h"
 #include "util/half_float.h"
 
-#define TODO() assert(!"TODO");
+#define gen_todo(fmt, ...)                                              \
+   do {                                                                 \
+      static bool once;                                                 \
+      if (INTEL_GEN_DEBUG(TODO) && !once) {                             \
+         mesa_log(MESA_LOG_WARN, ("brw gen"),                           \
+                  (fmt), ##__VA_ARGS__);                                \
+         once = true;                                                   \
+      }                                                                 \
+   } while (0)
 
 gen_opcode
 brw_generator_gen::to_gen(enum opcode op)
@@ -1078,13 +1086,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
    int loop_count = 0, send_count = 0, nop_count = 0, sync_nop_count = 0;
    bool is_accum_used = false;
 
-   // TODO: Remove me.
+   gen_todo("implement brw_print_instructions");
    // brw_print_instructions(s);
-   //
-   // fprintf(stderr, "=======================\n");
-   // fprintf(stderr, "=======================\n");
-   // fprintf(stderr, "=======================\n");
-   // fprintf(stderr, "=======================\n");
    //
    // struct disasm_info *disasm_info = disasm_initialize(p->isa, s.cfg);
    const bool annotate = debug_flag || params->archiver;
@@ -1177,8 +1180,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
          swsb = tgl_swsb_dst_dep(swsb, 1);
       }
 
-      // TODO: ANNOTATE
-
+      gen_todo("add annotate support");
       // if (unlikely(annotate))
       //    disasm_annotate(disasm_info, inst, p->next_insn_offset);
 
@@ -1309,7 +1311,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
       case BRW_OPCODE_LRP:
       case BRW_OPCODE_ADD3:
 
-         // TODO: HERE: Handling BFI2 and swizzles!
+         gen_todo("handle BFI2 and swizzles");
 
          assert(inst->opcode != BRW_OPCODE_DP4A || devinfo->ver >= 12);
          assert(inst->opcode != BRW_OPCODE_LRP  || devinfo->ver == 9);
@@ -1475,9 +1477,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
             append_MOV(dst, stride(src[0], 8, 4, 1));
          } else {
             /* Coarse pixel case */
-            TODO(); // untested
+            gen_todo("FS_OPCODE_PIXEL_X untested");
             append(BRW_OPCODE_ADD, dst, stride(src[0], 8, 4, 1), src[1]);
-            // brw_ADD(p, dst, stride(src[0], 8, 4, 1), src[1]);
          }
          break;
       case FS_OPCODE_PIXEL_Y:
@@ -1489,9 +1490,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
             append_MOV(dst, stride(src[0], 8, 4, 1));
          } else {
             /* Coarse pixel case */
-            TODO(); // untested
+            gen_todo("FS_OPCODE_PIXEL_Y untested");
             append(BRW_OPCODE_ADD, dst, stride(src[0], 8, 4, 1), src[1]);
-            // brw_ADD(p, dst, stride(src[0], 8, 4, 1), src[1]);
          }
          break;
 
@@ -1522,7 +1522,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
 	 break;
 
       case SHADER_OPCODE_SCRATCH_HEADER:
-         TODO();
+         gen_todo("SHADER_OPCODE_SCRATCH_HEADER untested");
          generate_scratch_header(inst, dst, src[0]);
          break;
 
@@ -1868,8 +1868,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
       delete gen;
    gen_insts.clear();
 
-   return start_offset;
-
+   gen_todo("validate instructions");
 // #ifndef NDEBUG
 //    bool validated =
 // #else
@@ -1879,11 +1878,13 @@ brw_generator_gen::generate_code(const brw_shader &s,
 //                                 start_offset,
 //                                 p->next_insn_offset,
 //                                 disasm_info);
-//
+
+   gen_todo("implement compact");
 //    int before_size = p->next_insn_offset - start_offset;
 //    brw_compact_instructions(p, start_offset, disasm_info);
 //    int after_size = p->next_insn_offset - start_offset;
-//
+
+   gen_todo("implement INTEL_DEBUG=mda");
 //    bool dump_shader_bin = brw_should_dump_shader_bin();
 //    unsigned char sha1[21];
 //    char sha1buf[41];
@@ -1959,9 +1960,9 @@ brw_generator_gen::generate_code(const brw_shader &s,
 //          debug_archiver_finish_file(params->archiver);
 //       }
 //    }
-//
+
 //    ralloc_free(disasm_info);
-//
+
 // #ifndef NDEBUG
 //    if (!validated && !debug_flag) {
 //       fprintf(stderr,
@@ -1969,7 +1970,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
 //    }
 // #endif
 //    assert(validated);
-//
+
+   gen_todo("shader stats");
 //    brw_shader_debug_log(compiler, params->log_data,
 //                         "%s SIMD%d shader: %d inst, %d loops, %u cycles, "
 //                         "%d:%d spills:fills, %u sends, "
@@ -2016,8 +2018,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
 //       else
 //          stats->workgroup_memory_size = 0;
 //    }
-//
-//    return start_offset;
+
+   return start_offset;
 }
 
 void
