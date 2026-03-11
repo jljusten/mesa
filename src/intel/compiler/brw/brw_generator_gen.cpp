@@ -2209,10 +2209,17 @@ brw_generator_gen::append_reloc(const intel_shader_reloc &r)
 }
 
 static void
-print_raw(FILE *fp, const void *raw)
+print_raw(const struct brw_isa_info *isa, FILE *fp, const void *raw)
 {
    fprintf(fp, "(msb)  ");
-   for (int i = 127; i >= 0; i--) {
+   int msb = 127;
+   if (gen_as_raw_compact_inst(isa->devinfo, raw)) {
+      fprintf(fp,
+              "                 " "                 "
+              "                 " "                 ");
+      msb = 63;
+   }
+   for (int i = msb; i >= 0; i--) {
       if (i && (i+1) % 16 == 0)
          fprintf(fp, "'");
       fprintf(fp, "%lu", brw_eu_inst_bits((brw_eu_inst *)raw, i, i));
@@ -2220,13 +2227,58 @@ print_raw(FILE *fp, const void *raw)
    fprintf(fp, "  (lsb)\n");
 }
 
+static void
+print_disasm(FILE *fp, const struct brw_isa_info *isa,
+             const void *inst)
+{
+   brw_eu_inst uncompacted;
+   bool is_compact = gen_as_raw_compact_inst(isa->devinfo, inst);
+   if (is_compact) {
+      brw_uncompact_instruction(isa, &uncompacted, (brw_eu_compact_inst*)inst);
+      inst = &uncompacted;
+   }
+   brw_disassemble_inst(fp, isa, (brw_eu_inst *)inst, is_compact, 0, NULL);
+}
+
 bool
 diff_insts(const struct brw_isa_info *isa,
            const void *original,
            const void *encoded)
 {
-   if (memcmp(original, encoded, sizeof(gen_raw_inst)) == 0)
+   auto a = gen_as_raw_inst(isa->devinfo, original);
+   auto ac = gen_as_raw_compact_inst(isa->devinfo, original);
+   auto b = gen_as_raw_inst(isa->devinfo, encoded);
+   auto bc = gen_as_raw_compact_inst(isa->devinfo, encoded);
+
+   if (a && b && (memcmp(a, b, sizeof(*a)) == 0))
       return false;
+
+   if (ac && bc && (memcmp(ac, bc, sizeof(*ac)) == 0))
+      return false;
+
+   bool compact_diff = (a && bc) || (ac && b);
+
+   gen_raw_inst au, bu;
+   if (a) {
+      au = *a;
+   } else {
+      brw_uncompact_instruction(isa, (brw_eu_inst*)&au,
+                                (brw_eu_compact_inst*)ac);
+   }
+   if (b) {
+      bu = *b;
+   } else {
+      brw_uncompact_instruction(isa, (brw_eu_inst*)&bu,
+                                (brw_eu_compact_inst*)bc);
+   }
+
+   if (compact_diff && (memcmp(&au, &bu, sizeof(au)) == 0)) {
+      if (INTEL_GEN_DEBUG(VERBOSE)) {
+         printf("Intel gen: Compact vs uncompact mismatch, "
+                "but uncompact instructions match\n");
+      }
+      return false;
+   }
 
    char buffer[8192];
    FILE *fp = fmemopen(buffer, sizeof(buffer), "w");
@@ -2234,12 +2286,18 @@ diff_insts(const struct brw_isa_info *isa,
    fprintf(fp, "\n==== MISMATCH START ====\n");
 
    fprintf(fp, "ORIGINAL: ");
-   brw_disassemble_inst(fp, isa, (brw_eu_inst *)original, false, 0, NULL);
-   fprintf(fp, "\n");
+   if (original) {
+      print_disasm(fp, isa, original);
+   } else {
+      fprintf(fp, "N/A\n");
+   }
 
    fprintf(fp, "ENCODED:  ");
-   brw_disassemble_inst(fp, isa, (brw_eu_inst *)encoded, false, 0, NULL);
-   fprintf(fp, "\n");
+   if (encoded) {
+      print_disasm(fp, isa, encoded);
+   } else {
+      fprintf(fp, "N/A\n");
+   }
 
    fprintf(fp, "\n------------------------------\n\n");
 
@@ -2249,29 +2307,40 @@ diff_insts(const struct brw_isa_info *isa,
            "/31  24\\/23  16\\ /15   8\\/7    0\\"
            "\n");
    fprintf(fp, "ORIGINAL BITS: ");
-   print_raw(fp, original);
+   print_raw(isa, fp, original);
 
    fprintf(fp, "ENCODED BITS:  ");
-   print_raw(fp, encoded);
+   print_raw(isa, fp, encoded);
+
+   if (ac) {
+      fprintf(fp, "ORIG UNCOMP:   ");
+      print_raw(isa, fp, &au);
+   }
+
+   if (bc) {
+      fprintf(fp, "ENC UNCOMP:    ");
+      print_raw(isa, fp, &bu);
+   }
 
    fprintf(fp, "MARKERS:       ");
    fprintf(fp, "       ");
    for (int i = 127; i >= 0; i--) {
       if (i && (i+1) % 16 == 0)
          fprintf(fp, " ");
-      if (brw_eu_inst_bits((brw_eu_inst *)original, i, i) != brw_eu_inst_bits((brw_eu_inst*)encoded, i, i))
+      if (brw_eu_inst_bits((brw_eu_inst *)&au, i, i) !=
+          brw_eu_inst_bits((brw_eu_inst*)&bu, i, i))
          fprintf(fp, "^");
       else
          fprintf(fp, " ");
    }
-   fprintf(fp, "\n");
 
    fprintf(fp, "\n------------------------------\n\n");
 
    fprintf(fp, "MISMATCH BITS:");
    unsigned count = 0;
    for (int i = 127; i >= 0; i--) {
-      if (brw_eu_inst_bits((brw_eu_inst*)original, i, i) != brw_eu_inst_bits((brw_eu_inst*)encoded, i, i)) {
+      if (brw_eu_inst_bits((brw_eu_inst*)&au, i, i) !=
+          brw_eu_inst_bits((brw_eu_inst*)&bu, i, i)) {
          fprintf(fp, " %d", i);
          count++;
       }
@@ -2282,8 +2351,8 @@ diff_insts(const struct brw_isa_info *isa,
 
    fclose(fp);
 
-   fputs(buffer, stderr);
-   fflush(stderr);
+   puts(buffer);
+   fflush(stdout);
 
    return true;
 }
