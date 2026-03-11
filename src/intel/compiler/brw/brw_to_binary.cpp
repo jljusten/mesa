@@ -2646,10 +2646,60 @@ brw_generator::generate_code(const brw_shader &s,
                  "\n");
 
          if (enc_params.compact_all) {
-            for (int i = 0; i < limit; i++) {
-               if (gen_code[i] != old_code[i]) {
-                  fprintf(stderr, "\nERROR AT BYTE OFFSET: 0x%x\n", i);
+            const void *gen_inst = gen_code;
+            const void *old_inst = old_code;
+            unsigned gen_offset = 0, old_offset = 0, matched_count = 0;
+            bool mismatch = false;
+
+            while (true) {
+               gen_inst = gen_offset < (unsigned)after_size ?
+                  gen_code + gen_offset : NULL;
+               old_inst = old_offset < (unsigned)old_size ?
+                  old_code + old_offset : NULL;
+
+               if (!gen_inst && !old_inst)
                   break;
+
+               if (!gen_inst || !old_inst) {
+                  mismatch = true;
+                  break;
+               }
+
+               const gen_raw_inst *gen_uncomp =
+                  gen_as_raw_inst(devinfo, gen_inst);
+               const gen_raw_compact_inst *gen_comp =
+                  gen_as_raw_compact_inst(devinfo, gen_inst);
+               const gen_raw_inst *old_uncomp =
+                  gen_as_raw_inst(devinfo, old_inst);
+               const gen_raw_compact_inst *old_comp =
+                  gen_as_raw_compact_inst(devinfo, old_inst);
+
+               if (gen_uncomp && old_uncomp) {
+                  mismatch = memcmp(gen_uncomp, old_uncomp,
+                                    sizeof(*gen_uncomp)) != 0;
+               } else if (gen_comp && old_comp) {
+                  mismatch = memcmp(gen_comp, old_comp,
+                                    sizeof(*gen_comp)) != 0;
+               } else {
+                  mismatch = true;
+               }
+
+               if (mismatch)
+                  break;
+
+               matched_count++;
+               gen_offset += gen_uncomp ? sizeof(gen_raw_inst) :
+                                           sizeof(gen_raw_compact_inst);
+               old_offset += old_uncomp ? sizeof(gen_raw_inst) :
+                                           sizeof(gen_raw_compact_inst);
+            }
+
+            if (mismatch) {
+               if (diff_insts(&compiler->isa, gen_inst, old_inst,
+                              matched_count)) {
+                  fprintf(stderr,
+                          "\nERROR AT GEN OFFSET: 0x%x, OLD OFFSET: 0x%x\n",
+                          gen_offset, old_offset);
                }
             }
          } else {
