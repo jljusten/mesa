@@ -1529,6 +1529,16 @@ brw_generator::add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt)
    }
 }
 
+#define gen_todo(fmt, ...)                                              \
+   do {                                                                 \
+      static bool once;                                                 \
+      if (INTEL_GEN_DEBUG(TODO) && !once) {                             \
+         mesa_log(MESA_LOG_WARN, ("brw gen"),                           \
+                  (fmt), ##__VA_ARGS__);                                \
+         once = true;                                                   \
+      }                                                                 \
+   } while (0)
+
 const unsigned *
 brw_generator::get_assembly()
 {
@@ -1580,7 +1590,11 @@ brw_generator::get_assembly()
          } else if (ac && bc) {
             mismatch = ac->data != bc->data;
          } else {
-            mismatch = true;
+            gen_todo("don't allow mismatch for compaction");
+            mismatch =
+               !uncompacted_insts_match(&compiler->isa,
+                                        a ? (void*)a : (void*)ac,
+                                        b ? (void*)b : (void*)bc);
          }
          if (mismatch)
             break;
