@@ -4,9 +4,9 @@
  */
 
 #include <ctype.h>
+#include <stdlib.h>
 
 #include "util/ralloc.h"
-#include "intel/compiler/brw/brw_asm.h"
 
 #include "executor.h"
 
@@ -20,8 +20,7 @@ static char *
 skip_prefix(char *prefix, char *start)
 {
    assert(startswith(prefix, start));
-   char *c = start += strlen(prefix);
-   return c;
+   return start + strlen(prefix);
 }
 
 static bool
@@ -42,7 +41,6 @@ parse_args(void *mem_ctx, char *c)
    parse_args_result r = {0};
 
    while (*c) {
-      /* Skip spaces. */
       while (*c && isspace(*c))
          c++;
 
@@ -52,11 +50,27 @@ parse_args(void *mem_ctx, char *c)
       char *start = c;
       while (*c && !isspace(*c) && !is_comment(c))
          c++;
+
       r.args = reralloc_array_size(mem_ctx, r.args, sizeof(char *), r.count + 1);
       r.args[r.count++] = ralloc_strndup(mem_ctx, start, c - start);
    }
 
    return r;
+}
+
+static const char *
+normalize_reg(void *mem_ctx, const char *reg)
+{
+   if ((reg[0] == 'g' || reg[0] == 'r') && isdigit((unsigned char)reg[1]))
+      return ralloc_asprintf(mem_ctx, "r%s", reg + 1);
+
+   return reg;
+}
+
+static unsigned
+executor_simd_width(const executor_context *ec)
+{
+   return ec->devinfo->ver >= 20 ? 16 : 8;
 }
 
 static void
@@ -68,8 +82,9 @@ executor_macro_mov(executor_context *ec, char **src, char *line)
    if (r.count != 2)
       failf("@mov needs 2 arguments, found %d\n", r.count);
 
-   const char *reg = r.args[0];
-   char *value     = r.args[1];
+   const char *reg = normalize_reg(ec->mem_ctx, r.args[0]);
+   char *value = r.args[1];
+   const unsigned width = executor_simd_width(ec);
 
    if (strchr(value, '.')) {
       union {
@@ -78,69 +93,36 @@ executor_macro_mov(executor_context *ec, char **src, char *line)
       } val;
 
       val.f = strtof(value, NULL);
-
-      switch (ec->devinfo->verx10) {
-      case 90:
-      case 110:
-      case 120:
-      case 125: {
-         ralloc_asprintf_append(src, "mov(8) %s<1>F 0x%08xF /* %f */ { align1 1Q };\n", reg, val.u, val.f);
-         break;
-      }
-      case 200:
-      case 300: {
-         ralloc_asprintf_append(src, "mov(16) %s<1>F 0x%08xF /* %f */ { align1 1H };\n", reg, val.u, val.f);
-         break;
-      }
-      default:
-         UNREACHABLE("invalid gfx version");
-      }
-
+      ralloc_asprintf_append(src,
+         "mov (%u) %s:f 0x%08x:f\n",
+         width, reg, val.u);
    } else {
-      for (char *c = value; *c; c++)
-         *c = tolower(*c);
-      switch (ec->devinfo->verx10) {
-      case 90:
-      case 110:
-      case 120:
-      case 125: {
-         ralloc_asprintf_append(src, "mov(8) %s<1>UD %sUD { align1 1Q };\n", reg, value);
-         break;
-      }
+      for (char *x = value; *x; x++)
+         *x = tolower(*x);
 
-      case 200:
-      case 300: {
-         ralloc_asprintf_append(src, "mov(16) %s<1>UD %sUD { align1 1H };\n", reg, value);
-         break;
-      }
-
-      default:
-         UNREACHABLE("invalid gfx version");
-      }
+      ralloc_asprintf_append(src,
+         "mov (%u) %s %s\n",
+         width, reg, value);
    }
 }
 
 static void
 executor_macro_syncnop(executor_context *ec, char **src, char *line)
 {
+   (void)line;
+
    switch (ec->devinfo->verx10) {
    case 90:
-   case 110: {
-      /* Not needed. */
+   case 110:
       break;
-   }
 
-   case 120: {
-      ralloc_strcat(src, "sync nop(8)  null<0,1,0>UD  { align1 WE_all 1H @1 $1.dst };\n");
-      break;
-   }
-
+   case 120:
    case 125:
    case 200:
-   case 300: {
-      ralloc_strcat(src, "sync nop(8)  null<0,1,0>UD  { align1 WE_all 1H A@1 $1.dst };\n");
+   case 300:
+      ralloc_strcat(src,
+         "(W) sync.nop (8) null {A@1,$1.dst}\n");
       break;
-   }
 
    default:
       UNREACHABLE("invalid gfx version");
@@ -150,39 +132,35 @@ executor_macro_syncnop(executor_context *ec, char **src, char *line)
 static void
 executor_macro_eot(executor_context *ec, char **src, char *line)
 {
+   (void)line;
+
    switch (ec->devinfo->verx10) {
    case 90:
-   case 110: {
+   case 110:
       ralloc_strcat(src,
-         "mov(8)          g127<1>UD  g0<8;8,1>UD    { align1 WE_all 1Q };\n"
-         "send(8)         null<1>UW  g127<0,1,0>UD  0x82000010\n"
-         "    ts/btd MsgDesc: mlen 1 rlen 0 { align1 WE_all 1Q EOT };\n");
+         "(W) mov (8) r127 r0<8;8,1>\n"
+         "(W) send.ts (8) null r127:1 null:0 0x00000000 0x82000010 {EOT}\n");
       break;
-   }
-   case 120: {
-      ralloc_strcat(src,
-         "mov(8)          g127<1>UD  g0<8;8,1>UD  { align1 WE_all 1Q };\n"
-         "send(8)         nullUD     g127UD       nullUD  0x02000000  0x00000000\n"
-         "    ts/btd MsgDesc:  mlen 1 ex_mlen 0 rlen 0 { align1 WE_all 1Q @1 EOT };\n");
-      break;
-   }
 
-   case 125: {
+   case 120:
       ralloc_strcat(src,
-         "mov(8)         g127<1>UD  g0<8;8,1>UD  { align1 WE_all 1Q };\n"
-         "send(8)        nullUD     g127UD       nullUD  0x02000000  0x00000000\n"
-         "    gateway MsgDesc: (open)  mlen 1 ex_mlen 0 rlen 0 { align1 WE_all 1Q A@1 EOT };\n");
-         break;
-   }
+         "(W) mov (8) r127 r0<8;8,1>\n"
+         "(W) send.ts (8) null r127:1 null:0 0x00000000 0x02000000 {A@1,EOT}\n");
+      break;
+
+   case 125:
+      ralloc_strcat(src,
+         "(W) mov (8) r127 r0<8;8,1>\n"
+         "(W) send.gtwy (8) null r127:1 null:0 0x00000000 0x02000000 {A@1,EOT}\n");
+      break;
 
    case 200:
-   case 300: {
+   case 300:
       ralloc_strcat(src,
-         "mov(16)         g127<1>UD  g0<1,1,0>UD  { align1 WE_all 1H };\n"
-         "send(16)        nullUD     g127UD       nullUD  0x02000000  0x00000000\n"
-         "    gateway MsgDesc: (open)  mlen 1 ex_mlen 0 rlen 0 { align1 WE_all 1H I@1 EOT };\n");
-         break;
-   }
+         "(W) mov (16) r127 r0\n"
+         "(W) send.gtwy (16) null r127:1 null:0 0x00000000 0x02000000 {I@1,EOT}\n");
+      break;
+
    default:
       UNREACHABLE("invalid gfx version");
    }
@@ -197,27 +175,27 @@ executor_macro_id(executor_context *ec, char **src, char *line)
    if (r.count != 1)
       failf("@id needs 1 argument, found %d\n", r.count);
 
-   const char *reg = r.args[0];
+   const char *reg = normalize_reg(ec->mem_ctx, r.args[0]);
 
    switch (ec->devinfo->verx10) {
    case 90:
    case 110:
    case 120:
-   case 125: {
+   case 125:
       ralloc_asprintf_append(src,
-         "mov(8)  g127<1>UW  0x76543210V    { align1 WE_all 1Q };\n"
-         "mov(8)  %s<1>UD    g127<8,8,1>UW  { align1 WE_all 1Q @1 };\n", reg);
+         "(W) mov (8) r127:uw 0x76543210:v\n"
+         "(W) mov (8) %s r127<8;8,1>:uw {A@1}\n",
+         reg);
       break;
-   }
 
    case 200:
-   case 300: {
+   case 300:
       ralloc_asprintf_append(src,
-         "mov(8)  g127<1>UW    0x76543210V         { align1 WE_all 1Q };\n"
-         "add(8)  g127.8<1>UW  g127<1,1,0>UW  8UW  { align1 WE_all 1Q @1 };\n"
-         "mov(16) %s<1>UD      g127<8,8,1>UW       { align1 WE_all 1Q @1 };\n", reg);
+         "(W) mov (8) r127:uw 0x76543210:v\n"
+         "(W) add (8) r127.8:uw r127:uw 8:uw {A@1}\n"
+         "(W) mov (16) %s r127<8;8,1>:uw {A@1}\n",
+         reg);
       break;
-   }
 
    default:
       UNREACHABLE("invalid gfx version");
@@ -233,55 +211,44 @@ executor_macro_write(executor_context *ec, char **src, char *line)
    if (r.count != 2)
       failf("@write needs 2 arguments, found %d\n", r.count);
 
-   const char *offset_reg = r.args[0];
-   const char *data_reg   = r.args[1];
+   const char *offset_reg = normalize_reg(ec->mem_ctx, r.args[0]);
+   const char *data_reg = normalize_reg(ec->mem_ctx, r.args[1]);
 
    assert(ec->bo.data.addr <= 0xFFFFFFFF);
-   uint32_t base_addr = ec->bo.data.addr;
+   const uint32_t base_addr = ec->bo.data.addr;
 
    switch (ec->devinfo->verx10) {
    case 90:
    case 110:
    case 120: {
-      const char *send_suffix = ec->devinfo->verx10 < 120 ? "s" : "";
+      const char *send_op = ec->devinfo->verx10 < 120 ? "sends.hdc1" : "send.hdc1";
       ralloc_asprintf_append(src,
-         "mul(8)          g127<1>UD  %s<8;8,1>UD    0x4UW     { align1 @1 1Q };\n"
-         "add(8)          g127<1>UD  g127<8;8,1>UD  0x%08xUD  { align1 @1 1Q };\n"
-         "send%s(8)       nullUD     g127UD         %sUD      0x2026efd   0x00000040\n"
-         "    hdc1 MsgDesc: (DC untyped surface write, Surface = 253, "
-         "                        SIMD8, Mask = 0xe) mlen 1 ex_mlen 1 rlen 0 "
-         "    { align1 1Q @1 $1 };\n",
-         offset_reg, base_addr, send_suffix, data_reg);
+         "mul (8) r127 %s<8;8,1> 0x4:uw {A@1}\n"
+         "add (8) r127 r127<8;8,1> 0x%08x {A@1}\n"
+         "%s (8) null r127:1 %s:1 0x00000040 0x02026efd {A@1,$1}\n",
+         offset_reg, base_addr, send_op, data_reg);
       executor_macro_syncnop(ec, src, "@syncnop");
       break;
    }
 
-   case 125: {
+   case 125:
       ralloc_asprintf_append(src,
-         "mul(8)          g127<1>UD  %s<1;1,0>UD    0x4UW     { align1 @1 1Q };\n"
-         "add(8)          g127<1>UD  g127<1;1,0>UD  0x%08xUD  { align1 @1 1Q };\n"
-         "send(8)         nullUD     g127UD         %sUD      0x02000504 0x00000040\n"
-         "    ugm MsgDesc: ( store, a32, d32, x, L1STATE_L3MOCS dst_len = 0, "
-         "                   src0_len = 1, src1_len = 1, flat )  base_offset 0 "
-         "    { align1 1Q A@1 $1 };\n",
+         "mul (8) r127 %s 0x4:uw {A@1}\n"
+         "add (8) r127 r127 0x%08x {A@1}\n"
+         "send.ugm (8) null r127:1 %s:1 0x00000040 0x02000504 {A@1,$1}\n",
          offset_reg, base_addr, data_reg);
       executor_macro_syncnop(ec, src, "@syncnop");
       break;
-   }
 
    case 200:
-   case 300: {
+   case 300:
       ralloc_asprintf_append(src,
-         "mul(16)          g127<1>UD  %s<1;1,0>UD    0x4UW     { align1 @1 1Q };\n"
-         "add(16)          g127<1>UD  g127<1;1,0>UD  0x%08xUD  { align1 @1 1Q };\n"
-         "send(16)         nullUD     g127UD         %sUD      0x02000504 0x00000040\n"
-         "    ugm MsgDesc: ( store, a32, d32, x, L1STATE_L3MOCS dst_len = 0, "
-         "                   src0_len = 1, src1_len = 1, flat ) base_offset 0  "
-         "    { align1 1Q A@1 $1 };\n",
+         "mul (16) r127 %s 0x4:uw {A@1}\n"
+         "add (16) r127 r127 0x%08x {A@1}\n"
+         "send.ugm (16) null r127:1 %s:1 0x00000040 0x02000504 {A@1,$1}\n",
          offset_reg, base_addr, data_reg);
       executor_macro_syncnop(ec, src, "@syncnop");
       break;
-   }
 
    default:
       UNREACHABLE("invalid gfx version");
@@ -297,56 +264,44 @@ executor_macro_read(executor_context *ec, char **src, char *line)
    if (r.count != 2)
       failf("@read needs 2 arguments, found %d\n", r.count);
 
-   /* Order follows underlying SEND, destination first. */
-   const char *data_reg   = r.args[0];
-   const char *offset_reg = r.args[1];
+   const char *data_reg = normalize_reg(ec->mem_ctx, r.args[0]);
+   const char *offset_reg = normalize_reg(ec->mem_ctx, r.args[1]);
 
    assert(ec->bo.data.addr <= 0xFFFFFFFF);
-   uint32_t base_addr = ec->bo.data.addr;
+   const uint32_t base_addr = ec->bo.data.addr;
 
    switch (ec->devinfo->verx10) {
    case 90:
    case 110:
    case 120: {
-      const char *send_suffix = ec->devinfo->verx10 < 120 ? "s" : "";
+      const char *send_op = ec->devinfo->verx10 < 120 ? "sends.hdc1" : "send.hdc1";
       ralloc_asprintf_append(src,
-         "mul(8)          g127<1>UD  %s<8;8,1>UD    0x4UW     { align1 @1 1Q };\n"
-         "add(8)          g127<1>UD  g127<8;8,1>UD  0x%08xUD  { align1 @1 1Q };\n"
-         "send%s(8)       %sUD       g127UD         nullUD    0x2106efd   0x00000000\n"
-         "    hdc1 MsgDesc: (DC untyped surface read, Surface = 253, "
-         "                        SIMD8, Mask = 0xe) mlen 1 ex_mlen 0 rlen 1 "
-         "    { align1 1Q @1 $1 };\n",
-         offset_reg, base_addr, send_suffix, data_reg);
+         "mul (8) r127 %s<8;8,1> 0x4:uw {A@1}\n"
+         "add (8) r127 r127<8;8,1> 0x%08x {A@1}\n"
+         "%s (8) %s r127:1 null:0 0x00000000 0x02106efd {A@1,$1}\n",
+         offset_reg, base_addr, send_op, data_reg);
       executor_macro_syncnop(ec, src, "@syncnop");
       break;
    }
 
-   case 125: {
+   case 125:
       ralloc_asprintf_append(src,
-         "mul(8)          g127<1>UD  %s<1;1,0>UD    0x4UW     { align1 @1 1Q };\n"
-         "add(8)          g127<1>UD  g127<1;1,0>UD  0x%08xUD  { align1 @1 1Q };\n"
-         "send(8)         %sUD       g127UD         nullUD    0x02100500 0x00000000\n"
-         "    ugm MsgDesc: ( load, a32, d32, x, L1STATE_L3MOCS dst_len = 1, "
-         "                   src0_len = 1, flat ) src1_len = 0  base_offset 0 "
-         "    { align1 1Q A@1 $1 };\n",
+         "mul (8) r127 %s 0x4:uw {A@1}\n"
+         "add (8) r127 r127 0x%08x {A@1}\n"
+         "send.ugm (8) %s r127:1 null:0 0x00000000 0x02100500 {A@1,$1}\n",
          offset_reg, base_addr, data_reg);
       executor_macro_syncnop(ec, src, "@syncnop");
       break;
-   }
 
    case 200:
-   case 300: {
+   case 300:
       ralloc_asprintf_append(src,
-         "mul(16)         g127<1>UD  %s<1;1,0>UD    0x4UW     { align1 @1 1Q };\n"
-         "add(16)         g127<1>UD  g127<1;1,0>UD  0x%08xUD  { align1 @1 1Q };\n"
-         "send(16)        %sUD       g127UD         nullUD    0x02100500 0x00000000\n"
-         "    ugm MsgDesc: ( load, a32, d32, x, L1STATE_L3MOCS dst_len = 1, "
-         "                   src0_len = 1, flat ) src1_len = 0  base_offset 0 "
-         "    { align1 1Q A@1 $1 };\n",
+         "mul (16) r127 %s 0x4:uw {A@1}\n"
+         "add (16) r127 r127 0x%08x {A@1}\n"
+         "send.ugm (16) %s r127:1 null:0 0x00000000 0x02100500 {A@1,$1}\n",
          offset_reg, base_addr, data_reg);
       executor_macro_syncnop(ec, src, "@syncnop");
       break;
-   }
 
    default:
       UNREACHABLE("invalid gfx version");
@@ -357,7 +312,8 @@ static char *
 find_macro_symbol(char *line)
 {
    char *c = line;
-   while (isspace(*c)) c++;
+   while (isspace(*c))
+      c++;
    return *c == '@' ? c : NULL;
 }
 
@@ -366,6 +322,7 @@ match_macro_name(const char *name, const char *line)
 {
    if (!startswith(name, line))
       return false;
+
    line += strlen(name);
    return !*line || isspace(*line) || is_comment(line);
 }
@@ -374,21 +331,18 @@ const char *
 executor_apply_macros(executor_context *ec, const char *original_src)
 {
    char *scratch = ralloc_strdup(ec->mem_ctx, original_src);
-
-   /* Create a ralloc'ed empty string so can call append to it later. */
    char *src = ralloc_strdup(ec->mem_ctx, "");
 
-   /* TODO: Create a @send macro for common combinations of MsgDesc. */
    static const struct {
       const char *name;
       void (*func)(executor_context *ec, char **output, char *line);
    } macros[] = {
-      { "@eot",      executor_macro_eot },
-      { "@mov",      executor_macro_mov },
-      { "@write",    executor_macro_write },
-      { "@read",     executor_macro_read },
-      { "@id",       executor_macro_id },
-      { "@syncnop",  executor_macro_syncnop },
+      { "@eot",     executor_macro_eot },
+      { "@mov",     executor_macro_mov },
+      { "@write",   executor_macro_write },
+      { "@read",    executor_macro_read },
+      { "@id",      executor_macro_id },
+      { "@syncnop", executor_macro_syncnop },
    };
 
    char *next = scratch;
@@ -396,7 +350,8 @@ executor_apply_macros(executor_context *ec, const char *original_src)
       char *line = next;
       char *end = line;
 
-      while (*end && *end != '\n') end++;
+      while (*end && *end != '\n')
+         end++;
       next = *end ? end + 1 : NULL;
       *end = '\0';
 

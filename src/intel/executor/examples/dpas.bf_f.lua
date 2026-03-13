@@ -45,12 +45,12 @@ local buf = execute {
 
     .. (devinfo.ver >= 20 and [[
 
-    dpas.8x8(16)  r40<1>F  r30<1>F  r20<1>BF  r10<1>BF  {A@1 $1};
+    dpas.8x8 (16) r40:f r30<16;16,1>:f r20<16;16,1>:bf r10<16;16,1>:bf {A@1,$1}
     @syncnop
 
     ]] or [[
 
-    dpas.8x8(8)  r40<1>F  r30<1>F  r20<1>BF  r10<1>BF  {A@1 $1};
+    dpas.8x8 (8) r40:f r30<8;8,1>:f r20<8;8,1>:bf r10<8;8,1>:bf {A@1,$1}
     @syncnop
 
     ]])
