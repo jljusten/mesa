@@ -3,11 +3,11 @@
 Execute the example from the Dot Product 4 Accumulate
 instruction as seen in the PRM.
 
-    mov (1) r1.0:d 0x0102037F:d
+    mov (1) r1:d 0x0102037F:d
     // (char4)(0x1,0x2,0x3,0x7F)
-    mov (1) r2.0:d 50:d
-    dp4a (1) r3.0:d r2:d r1:d r1:d
-    // r3.0 = 50 + (0x1*0x1 + 0x2*0x2 + 0x3*0x3 + 0x7F*0x7F)
+    mov (1) r2:d 50:d
+    dp4a (1) r3:d r2:d r1:d r1:d
+    // r3 = 50 + (0x1*0x1 + 0x2*0x2 + 0x3*0x3 + 0x7F*0x7F)
     // = 50 + (1 + 4 + 9 + 16129)
     // = 16193
 
@@ -27,14 +27,14 @@ end
 
 local r = execute {
   src = [[
-    @id   g9
+    @id   r9
 
-    @mov  g1  0x0102037F
-    @mov  g2  50
+    @mov  r1  0x0102037F
+    @mov  r2  50
 
-    dp4a(8)  g3<1>UD  g2<8,8,1>UD  g1<8,8,1>UD  g1<8,8,1>UD  { align1 @1 1Q };
+    dp4a (8) r3 r2<0> r1<0> r1<1> {A@1}
 
-    @write g9 g3
+    @write r9 r3
     @eot
   ]],
 }

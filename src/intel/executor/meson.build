@@ -10,6 +10,7 @@ executor_includes = [
   inc_include,
   inc_src,
   inc_intel,
+  inc_intel_compiler,
 ]
 
 executor_hw_libs = []
@@ -42,8 +43,9 @@ executor = executable(
     dep_libdrm,
     dep_lua,
     dep_valgrind,
-    idep_brw_asm,
     idep_genxml,
+    idep_intel_compiler_brw,
+    idep_intel_compiler_gen,
     idep_intel_decoder_brw,
     idep_intel_dev,
     idep_libintel_common,

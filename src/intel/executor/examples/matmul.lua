@@ -204,18 +204,26 @@ encode(a, format_ab)
 encode(b, format_ab)
 encode(c, format_cd)
 
+local function region_for(exec_size)
+  return string.format("<%d;%d,1>", exec_size, exec_size)
+end
+
 local buf = execute {
   src =
     [[]]
     .. gen.mov_grf(format_ab, 10, a:to_row_major())
     .. gen.mov_grf(format_ab, 20, b:to_interleaved_row_major(packing_factor))
     .. gen.mov_grf(format_cd, 30, c:to_row_major())
-    .. string.format([[
+    .. string.format([[ 
 
-    dpas.8x8(%d)  r40<1>%s  r30<1>%s  r20<1>%s  r10<1>%s  {A@1 $1};
+    dpas.8x8 (%d) r40:%s r30%s:%s r20%s:%s r10%s:%s {A@1,$1}
     @syncnop
 
-    ]], exec_size, format_cd, format_cd, format_ab, format_ab)
+    ]], exec_size,
+        string.lower(format_cd),
+        region_for(exec_size), string.lower(format_cd),
+        region_for(exec_size), string.lower(format_ab),
+        region_for(exec_size), string.lower(format_ab))
     .. gen.write_grfs(40, 8)
     .. [[
     @eot
