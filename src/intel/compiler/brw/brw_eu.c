@@ -10,6 +10,8 @@
 #include <fcntl.h>
 #include <inttypes.h>
 
+#include "intel/compiler/gen/gen.h"
+
 #include "brw_disasm.h"
 #include "brw_eu_defines.h"
 #include "brw_eu.h"
@@ -407,53 +409,123 @@ brw_create_label(struct brw_label **labels, int offset, void *mem_ctx)
    }
 }
 
-const struct brw_label *
-brw_label_assembly(const struct brw_isa_info *isa,
-                   const void *assembly, int start, int end, void *mem_ctx)
+struct brw_gen_disasm_info {
+   gen_inst **insts;
+   int num_insts;
+   int *offsets;
+   bool *compacted;
+};
+
+static bool
+brw_gen_disasm_info_init(const struct brw_isa_info *isa,
+                         const void *assembly, int start, int end,
+                         void *mem_ctx,
+                         struct brw_gen_disasm_info *info)
 {
-   const struct intel_device_info *const devinfo = isa->devinfo;
+   const struct intel_device_info *devinfo = isa->devinfo;
+   const int size = end - start;
 
-   struct brw_label *root_label = NULL;
+   memset(info, 0, sizeof(*info));
 
-   int to_bytes_scale = sizeof(brw_eu_inst) / brw_jump_scale(devinfo);
+   if (size < 0)
+      return false;
 
-   for (int offset = start; offset < end;) {
-      const brw_eu_inst *inst = (const brw_eu_inst *) ((const char *) assembly + offset);
-      brw_eu_inst uncompacted;
+   const int max_insts = size / 8;
+   int *offsets = max_insts > 0 ? ralloc_array(mem_ctx, int, max_insts) : NULL;
+   bool *compacted = max_insts > 0 ? ralloc_array(mem_ctx, bool, max_insts) : NULL;
 
-      bool is_compact = brw_eu_inst_cmpt_control(devinfo, inst);
+   gen_scan_raw_layout_params layout = {
+      .raw_bytes = (const char *)assembly + start,
+      .raw_bytes_size = size,
+      .offsets = offsets,
+      .was_compacted = compacted,
+      .num_insts = max_insts,
+   };
+   const bool ok = gen_scan_raw_layout(&layout);
+   assert(ok);
+   if (!ok)
+      return false;
 
-      if (is_compact) {
-         brw_eu_compact_inst *compacted = (brw_eu_compact_inst *)inst;
-         brw_uncompact_instruction(isa, &uncompacted, compacted);
-         inst = &uncompacted;
-      }
+   if (layout.end_offset != size)
+      return false;
 
-      if (brw_has_uip(devinfo, brw_eu_inst_opcode(isa, inst))) {
-         /* Instructions that have UIP also have JIP. */
-         brw_create_label(&root_label,
-            offset + brw_eu_inst_uip(devinfo, inst) * to_bytes_scale, mem_ctx);
-         brw_create_label(&root_label,
-            offset + brw_eu_inst_jip(devinfo, inst) * to_bytes_scale, mem_ctx);
-      } else if (brw_has_jip(devinfo, brw_eu_inst_opcode(isa, inst))) {
-         int jip = brw_eu_inst_jip(devinfo, inst);
+   for (int i = 0; i < layout.num_insts; i++)
+      offsets[i] += start;
 
-         brw_create_label(&root_label, offset + jip * to_bytes_scale, mem_ctx);
-      }
+   if (layout.num_insts == 0) {
+      info->offsets = offsets;
+      info->compacted = compacted;
+      return true;
+   }
 
-      if (is_compact) {
-         offset += sizeof(brw_eu_compact_inst);
+   const int normalized_size = layout.num_insts * (int)sizeof(brw_eu_inst);
+   uint8_t *normalized = ralloc_array(mem_ctx, uint8_t, normalized_size);
+
+   for (int i = 0; i < layout.num_insts; i++) {
+      const int offset = offsets[i];
+      const brw_eu_inst *inst = (const brw_eu_inst *)((const char *)assembly + offset);
+
+      if (compacted[i]) {
+         brw_eu_inst uncompacted;
+         brw_uncompact_instruction(isa, &uncompacted, (brw_eu_compact_inst *) inst);
+         memcpy(normalized + i * sizeof(brw_eu_inst),
+                &uncompacted, sizeof(uncompacted));
       } else {
-         offset += sizeof(brw_eu_inst);
+         memcpy(normalized + i * sizeof(brw_eu_inst), inst, sizeof(brw_eu_inst));
       }
    }
 
+   gen_decode_params params = {
+      .devinfo = devinfo,
+      .raw_bytes = normalized,
+      .raw_bytes_size = normalized_size,
+      .mem_ctx = mem_ctx,
+   };
+
+   if (!gen_decode(&params) || params.num_insts != layout.num_insts)
+      return false;
+
+   info->insts = params.insts;
+   info->num_insts = layout.num_insts;
+   info->offsets = offsets;
+   info->compacted = compacted;
+   return true;
+}
+
+const struct brw_label *
+brw_label_assembly(const struct brw_isa_info *isa,
+                   const void *assembly, int start, int end,
+                   void *mem_ctx)
+{
+   void *tmp_ctx = ralloc_context(NULL);
+   struct brw_gen_disasm_info info;
+
+   const bool ok = brw_gen_disasm_info_init(isa, assembly, start, end,
+                                            tmp_ctx, &info);
+   assert(ok);
+   if (!ok) {
+      ralloc_free(tmp_ctx);
+      return NULL;
+   }
+
+   struct brw_label *root_label = NULL;
+   for (int i = 0; i < info.num_insts; i++) {
+      if (gen_has_uip(info.insts[i]->opcode)) {
+         brw_create_label(&root_label, info.offsets[i] + (int32_t)info.insts[i]->src[0].imm, mem_ctx);
+         brw_create_label(&root_label, info.offsets[i] + (int32_t)info.insts[i]->src[1].imm, mem_ctx);
+      } else if (gen_has_jip(info.insts[i]->opcode)) {
+         brw_create_label(&root_label, info.offsets[i] + (int32_t)info.insts[i]->src[0].imm, mem_ctx);
+      }
+   }
+
+   ralloc_free(tmp_ctx);
    return root_label;
 }
 
 void
 brw_disassemble_with_labels(const struct brw_isa_info *isa,
-                            const void *assembly, int start, int end, FILE *out)
+                            const void *assembly, int start, int end,
+                            FILE *out)
 {
    void *mem_ctx = ralloc_context(NULL);
    const struct brw_label *root_label =
@@ -470,66 +542,46 @@ brw_disassemble(const struct brw_isa_info *isa,
                 const struct brw_label *root_label,
                 int64_t *lineno_offset, FILE *out)
 {
-   const struct intel_device_info *devinfo = isa->devinfo;
+   const bool dump_hex = INTEL_DEBUG(DEBUG_HEX);
+   void *mem_ctx = ralloc_context(NULL);
+   struct brw_gen_disasm_info info;
 
-   bool dump_hex = INTEL_DEBUG(DEBUG_HEX);
+   const bool ok = brw_gen_disasm_info_init(isa, assembly, start, end,
+                                            mem_ctx, &info);
+   assert(ok);
+   if (!ok) {
+      ralloc_free(mem_ctx);
+      return;
+   }
 
-   for (int offset = start; offset < end;) {
-      const brw_eu_inst *insn = (const brw_eu_inst *)((char *)assembly + offset);
-      brw_eu_inst uncompacted;
+   for (int i = 0; i < info.num_insts; i++) {
+      const int offset = info.offsets[i];
+      const brw_eu_inst *insn = (const brw_eu_inst *)((const char *)assembly + offset);
 
       if (root_label != NULL) {
-        const struct brw_label *label = brw_find_label(root_label, offset);
-        if (label != NULL) {
-           fprintf(out, "\nLABEL%d:\n", label->number);
-        }
+         const struct brw_label *label = brw_find_label(root_label, offset);
+         if (label != NULL)
+            fprintf(out, "\nLABEL%d:\n", label->number);
       }
 
-      bool compacted = brw_eu_inst_cmpt_control(devinfo, insn);
       if (lineno_offset)
          fprintf(out, "0x%08" PRIx64 ": ", *lineno_offset + offset);
 
-      if (compacted) {
-         brw_eu_compact_inst *compacted = (brw_eu_compact_inst *)insn;
-         if (dump_hex) {
-            unsigned char * insn_ptr = ((unsigned char *)&insn[0]);
-            const unsigned int blank_spaces = 24;
-            for (int i = 0 ; i < 8; i = i + 4) {
-               fprintf(out, "%02x %02x %02x %02x ",
-                       insn_ptr[i],
-                       insn_ptr[i + 1],
-                       insn_ptr[i + 2],
-                       insn_ptr[i + 3]);
-            }
-            /* Make compacted instructions hex value output vertically aligned
-             * with uncompacted instructions hex value
-             */
-            fprintf(out, "%*c", blank_spaces, ' ');
+      if (dump_hex) {
+         const unsigned char *insn_ptr = (const unsigned char *)insn;
+         const int inst_size = info.compacted[i] ? 8 : 16;
+         for (int j = 0; j < inst_size; j += 4) {
+            fprintf(out, "%02x %02x %02x %02x ",
+                    insn_ptr[j], insn_ptr[j + 1], insn_ptr[j + 2], insn_ptr[j + 3]);
          }
-
-         brw_uncompact_instruction(isa, &uncompacted, compacted);
-         insn = &uncompacted;
-      } else {
-         if (dump_hex) {
-            unsigned char * insn_ptr = ((unsigned char *)&insn[0]);
-            for (int i = 0 ; i < 16; i = i + 4) {
-               fprintf(out, "%02x %02x %02x %02x ",
-                       insn_ptr[i],
-                       insn_ptr[i + 1],
-                       insn_ptr[i + 2],
-                       insn_ptr[i + 3]);
-            }
-         }
+         if (info.compacted[i])
+            fprintf(out, "%*c", 24, ' ');
       }
 
-      brw_disassemble_inst(out, isa, insn, compacted, offset, root_label);
-
-      if (compacted) {
-         offset += sizeof(brw_eu_compact_inst);
-      } else {
-         offset += sizeof(brw_eu_inst);
-      }
+      brw_disassemble_inst(out, isa, insn, info.compacted[i], offset, root_label);
    }
+
+   ralloc_free(mem_ctx);
 }
 
 static const struct opcode_desc opcode_descs[] = {
