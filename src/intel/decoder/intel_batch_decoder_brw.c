@@ -6,7 +6,9 @@
 #include "intel_decoder.h"
 #include "intel_decoder_private.h"
 
-#include "compiler/brw/brw_disasm.h"
+#include "compiler/gen/gen.h"
+
+#include "util/ralloc.h"
 
 static void
 ctx_disassemble_program_brw(struct intel_batch_decode_ctx *ctx,
@@ -20,11 +22,51 @@ ctx_disassemble_program_brw(struct intel_batch_decode_ctx *ctx,
       return;
 
    fprintf(ctx->fp, "\nReferenced %s:\n", name);
-   brw_disassemble_with_errors(ctx->brw, bo.map, 0, NULL, ctx->fp);
+
+   const int size = gen_find_shader_size(&ctx->devinfo, bo.map, 0, bo.size);
+   if (size > 0) {
+      void *tmp_ctx = ralloc_context(NULL);
+
+      gen_decode_params decode = {
+         .devinfo = &ctx->devinfo,
+         .raw_bytes = bo.map,
+         .raw_bytes_size = size,
+         .mem_ctx = tmp_ctx,
+      };
+      gen_decode(&decode);
+
+      bool *was_compacted = decode.num_insts > 0 ?
+         ralloc_array(tmp_ctx, bool, decode.num_insts) : NULL;
+
+      gen_scan_raw_layout_params layout = {
+         .raw_bytes = bo.map,
+         .raw_bytes_size = size,
+         .was_compacted = was_compacted,
+         .num_insts = decode.num_insts,
+      };
+      const bool ok = gen_scan_raw_layout(&layout);
+      assert(ok);
+      if (!ok) {
+         ralloc_free(tmp_ctx);
+         return;
+      }
+      assert(layout.num_insts == decode.num_insts);
+
+      gen_print_params print = {
+         .devinfo = &ctx->devinfo,
+         .fp = ctx->fp,
+         .insts = decode.insts,
+         .num_insts = decode.num_insts,
+         .errors = decode.errors,
+         .num_errors = decode.num_errors,
+         .was_compacted = was_compacted,
+      };
+      gen_print(&print);
+
+      ralloc_free(tmp_ctx);
+   }
 
    if (ctx->shader_binary) {
-      int size = brw_disassemble_find_end(ctx->brw, bo.map, 0);
-
       ctx->shader_binary(ctx->user_data, short_name, addr,
                          bo.map, size);
    }
@@ -48,4 +90,3 @@ intel_batch_decode_ctx_init_brw(struct intel_batch_decode_ctx *ctx,
    ctx->brw = isa;
    ctx->disassemble_program = ctx_disassemble_program_brw;
 }
-

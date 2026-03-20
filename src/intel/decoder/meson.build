@@ -55,13 +55,13 @@ idep_intel_decoder = declare_dependency(
 libintel_decoder_brw = static_library(
   'intel_decoder_brw',
   [libintel_decoder_brw_files, genX_xml_h, sha1_h],
-  dependencies : idep_intel_decoder,
+  dependencies : [idep_intel_decoder, idep_intel_compiler_gen],
   kwargs : libintel_decoder_common_args
 )
 
 idep_intel_decoder_brw = declare_dependency(
   link_with : [libintel_decoder_brw],
-  dependencies : idep_intel_decoder,
+  dependencies : [idep_intel_decoder, idep_intel_compiler_gen],
 )
 
 if with_intel_elk
