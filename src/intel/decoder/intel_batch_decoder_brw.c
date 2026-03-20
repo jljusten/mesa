@@ -6,7 +6,39 @@
 #include "intel_decoder.h"
 #include "intel_decoder_private.h"
 
-#include "compiler/brw/brw_disasm.h"
+#include "intel/compiler/gen/gen.h"
+
+#include "util/ralloc.h"
+
+static void
+gen_disassemble_program(struct intel_batch_decode_ctx *ctx,
+                        const void *assembly,
+                        uint32_t size)
+{
+   void *mem_ctx = ralloc_context(NULL);
+   gen_decode_params decode = {
+      .devinfo = &ctx->devinfo,
+      .raw_bytes = assembly,
+      .raw_bytes_size = size,
+      .mem_ctx = mem_ctx,
+   };
+
+   gen_decode(&decode);
+
+   gen_print_params print = {
+      .devinfo = &ctx->devinfo,
+      .fp = ctx->fp,
+      .flags = GEN_PRINT_RAW_SENDS,
+      .insts = decode.insts,
+      .num_insts = decode.num_insts,
+      .errors = decode.errors,
+      .num_errors = decode.num_errors,
+      .was_compacted = decode.was_compacted,
+   };
+
+   gen_print(&print);
+   ralloc_free(mem_ctx);
+}
 
 static void
 ctx_disassemble_program_brw(struct intel_batch_decode_ctx *ctx,
@@ -19,12 +51,14 @@ ctx_disassemble_program_brw(struct intel_batch_decode_ctx *ctx,
    if (!bo.map)
       return;
 
+   const int size = gen_find_shader_size(&ctx->devinfo, bo.map, 0, bo.size);
+   if (size == 0)
+      return;
+
    fprintf(ctx->fp, "\nReferenced %s:\n", name);
-   brw_disassemble_with_errors(ctx->brw, bo.map, 0, NULL, ctx->fp);
+   gen_disassemble_program(ctx, bo.map, size);
 
    if (ctx->shader_binary) {
-      int size = brw_disassemble_find_end(ctx->brw, bo.map, 0);
-
       ctx->shader_binary(ctx->user_data, short_name, addr,
                          bo.map, size);
    }
@@ -48,4 +82,3 @@ intel_batch_decode_ctx_init_brw(struct intel_batch_decode_ctx *ctx,
    ctx->brw = isa;
    ctx->disassemble_program = ctx_disassemble_program_brw;
 }
-
