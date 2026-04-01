@@ -1424,20 +1424,6 @@ translate_systolic_depth(unsigned d)
    }
 }
 
-/**
- * Send message to shared unit \p sfid with a possibly indirect descriptor \p
- * desc.  If \p desc is not an immediate it will be transparently loaded to an
- * address register using an OR instruction.
- */
-void
-brw_send_indirect_message(struct brw_codegen *p,
-                          unsigned sfid,
-                          struct brw_reg dst,
-                          struct brw_reg payload,
-                          struct brw_reg desc,
-                          bool eot,
-                          bool gather);
-
 void
 brw_send_indirect_split_message(struct brw_codegen *p,
                                 unsigned sfid,
