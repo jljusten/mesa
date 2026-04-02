@@ -1865,6 +1865,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
    gen_encode_params enc_params = {
       .devinfo = devinfo,
+      .compact_all = !INTEL_DEBUG(DEBUG_NO_COMPACTION),
 
       /* Will explicitly call validation later. */
       .skip_validation = true,

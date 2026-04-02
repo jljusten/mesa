@@ -1429,7 +1429,7 @@ brw_generator::generate_code(const brw_shader &s,
    int before_size = p->next_insn_offset - start_offset;
 
    // TODO(COMPACT): Remove the check_gen() once compact is OK.
-   const bool compact = !INTEL_DEBUG(DEBUG_NO_COMPACTION) && !check_gen();
+   const bool compact = !INTEL_DEBUG(DEBUG_NO_COMPACTION);
 
    if (compact)
       brw_compact_instructions(p, start_offset, disasm_info);
@@ -1574,8 +1574,6 @@ brw_generator::generate_code(const brw_shader &s,
    if (check_gen()) {
       void *tmp_ctx = ralloc_context(NULL);
 
-      assert(!compact);
-
       gen_decode_params dec_params = {
          .devinfo = devinfo,
          .raw_bytes = (char *)p->store + start_offset,
@@ -1597,8 +1595,6 @@ brw_generator::generate_code(const brw_shader &s,
             fprintf(stderr, "ERROR: %d %s\n", dec_params.errors[i].index, dec_params.errors[i].msg);
          abort();
       }
-
-      assert(!compact);
 
       const int uncompact_size = dec_params.num_insts * sizeof(gen_raw_inst);
       gen_encode_params enc_params = {
