@@ -1857,7 +1857,8 @@ brw_generator_gen::generate_code(const brw_shader &s,
    }
 
    /* Ensure shaders start at 64 byte boundary. */
-   int start_offset = allocate_output(gen_insts.size() * 16, 64);
+   int uncompact_size = (int)gen_insts.size() * 16;
+   int start_offset = allocate_output(uncompact_size, 64);
    assert(start_offset == expected_start_offset);
 
    gen_raw_inst *start = (gen_raw_inst *)(output + start_offset);
@@ -1874,13 +1875,45 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
       .mem_ctx = mem_ctx,
       .raw_bytes = (void *)start,
-      .raw_bytes_size = (int)gen_insts.size() * 16,
+      .raw_bytes_size = uncompact_size,
    };
 
    const int before_size = enc_params.raw_bytes_size;
 
    bool encoded = gen_encode(&enc_params);
    assert(encoded);
+
+   assert(uncompact_size >= enc_params.raw_bytes_size);
+   /* Reduce size based on compact */
+   output_size -= uncompact_size - enc_params.raw_bytes_size;
+
+   const int max_insts = enc_params.raw_bytes_size / 8;
+   int *enc_offsets = max_insts > 0 ? ralloc_array(mem_ctx, int, max_insts) : NULL;
+
+   gen_scan_raw_layout_params enc_layout = {
+      .raw_bytes = enc_params.raw_bytes,
+      .raw_bytes_size = enc_params.raw_bytes_size,
+      .offsets = enc_offsets,
+      .num_insts = max_insts,
+   };
+   const bool ok = gen_scan_raw_layout(&enc_layout);
+   assert(ok);
+   UNUSED int size_diff = enc_layout.num_insts - enc_params.num_insts;
+   assert(size_diff >= 0 && size_diff <= 1); /* Maybe 1 padding nop */
+
+   /* Update relocs based on compaction */
+   for (int i = 0; i < num_relocs; i++) {
+      if (relocs[i].offset < (unsigned)start_offset)
+         continue;
+
+      int inst_num = (relocs[i].offset - start_offset) / sizeof(gen_raw_inst);
+      assert(inst_num <= enc_params.num_insts);
+      int delta = enc_offsets[inst_num] - (sizeof(gen_raw_inst) * inst_num);
+      relocs[i].offset += delta;
+   }
+
+   ralloc_free(enc_offsets);
+   enc_offsets = NULL;
 
    const int after_size = enc_params.raw_bytes_size;
 
