@@ -1064,6 +1064,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
    std::vector<std::pair<unsigned, unsigned>> if_stack;
    std::vector<unsigned> loop_stack;
+   const int expected_start_offset = align(output_size, 64);
 
    const linear_opts lin_opts = {
       .min_buffer_size = s.cfg->total_instructions * (unsigned)sizeof(gen_inst),
@@ -1517,7 +1518,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
          append_reloc({
             .id = src[0].ud,
             .type = INTEL_SHADER_RELOC_TYPE_MOV_IMM,
-            .offset = 16u * (unsigned)gen_insts.size(),
+            .offset = 16u * (unsigned)gen_insts.size() + expected_start_offset,
             .delta = src[1].ud,
          });
 
@@ -1857,6 +1858,7 @@ brw_generator_gen::generate_code(const brw_shader &s,
 
    /* Ensure shaders start at 64 byte boundary. */
    int start_offset = allocate_output(gen_insts.size() * 16, 64);
+   assert(start_offset == expected_start_offset);
 
    gen_raw_inst *start = (gen_raw_inst *)(output + start_offset);
 
