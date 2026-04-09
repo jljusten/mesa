@@ -98,6 +98,10 @@
             "SEND_SRC0_SUB_NR":         [ 103,  99 ],
             "SEND_SRC1_LEN":            [ 103,  99 ]
         },
+        "sub-fields": {
+            "# Relative to OPERAND sub-structures":"#",
+            "REG_NR":                   [  13,   6 ]
+        },
         "compact-fields": {
             "SRC1_REG_NR":              [  63,  56 ],
             "CMPT_CONTROL":             [  29,  29 ],
