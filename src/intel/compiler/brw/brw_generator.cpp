@@ -1695,6 +1695,35 @@ brw_generator::generate_code(const brw_shader &s,
          abort();
       }
 
+      if (enc_params.raw_bytes_size != after_size) {
+         fprintf(stderr, "ERROR: roundtrip size mismatch: 1st=%d 2nd=%d\n",
+                 after_size, enc_params.raw_bytes_size);
+         auto min_size = MIN2(after_size, enc_params.raw_bytes_size);
+         auto original = (const uint8_t *) ((char *)p->store + start_offset);
+         auto reencoded = (const uint8_t *) enc_params.raw_bytes;
+         int i;
+         for (i = 0; i < min_size; i++) {
+            if (original[i] != reencoded[i]) {
+               fprintf(stderr, "ERROR: roundtrip first mismatch byte offset: "
+                       "%d\n", i);
+               break;
+            }
+         }
+         if (i >= min_size) {
+            fprintf(stderr, "ERROR: no difference found in first %d bytes", i);
+         }
+         for (i = 0; i < min_size;) {
+            bool is_compact = gen_as_raw_compact_inst(devinfo, &original[i]);
+            auto original_inst_size = is_compact ? 8 : 16;
+            if (memcmp(&original[i], &reencoded[i], original_inst_size) != 0) {
+               if (diff_insts(&compiler->isa, &original[i], &reencoded[i], i)) {
+                  fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", i);
+                  abort();
+               }
+            }
+            i += original_inst_size;
+         }
+      }
       assert(enc_params.raw_bytes_size == after_size);
 
       auto original = (void*) ((char *)p->store + start_offset);
