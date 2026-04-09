@@ -1697,8 +1697,8 @@ brw_generator::generate_code(const brw_shader &s,
 
       assert(enc_params.raw_bytes_size == after_size);
 
-      auto original = (const brw_eu_inst *) ((char *)p->store + start_offset);
-      auto reencoded = (const brw_eu_inst *) enc_params.raw_bytes;
+      auto original = (void*) ((char *)p->store + start_offset);
+      auto reencoded = (void*) enc_params.raw_bytes;
 
       if (memcmp(original, reencoded, after_size) != 0) {
          fprintf(stderr,
@@ -1711,10 +1711,14 @@ brw_generator::generate_code(const brw_shader &s,
                  "DECODE / ENCODE ROUNDTRIP MISMATCH\n"
                  "\n");
          for (int i = 0; i < dec_params.num_insts; i++) {
-            if (diff_insts(&compiler->isa, &original[i], &reencoded[i], i)) {
-               fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", i*16);
+            if (diff_insts(&compiler->isa, original, reencoded, i)) {
+               fprintf(stderr, "\nERROR AT OFFSET: 0x%x (of 0x%x)\n", i*16,
+                       dec_params.num_insts * 16);
                abort();
             }
+            int size = gen_as_raw_compact_inst(devinfo, original) ? 8 : 16;
+            original = (uint8_t*)original + size;
+            reencoded = (uint8_t*)reencoded + size;
          }
 
          abort();
