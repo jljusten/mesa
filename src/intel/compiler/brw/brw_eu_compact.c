@@ -1597,7 +1597,8 @@ precompact(const struct brw_isa_info *isa, brw_eu_inst inst)
       }
    }
 
-   if (brw_eu_inst_src0_reg_file(devinfo, &inst) != IMM)
+   if (is_3src(isa, brw_eu_inst_opcode(isa, &inst)) ||
+       brw_eu_inst_src0_reg_file(devinfo, &inst) != IMM)
       return inst;
 
    /* The Bspec's section titled "Non-present Operands" claims that if src0
