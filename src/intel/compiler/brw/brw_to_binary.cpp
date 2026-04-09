@@ -2554,10 +2554,57 @@ brw_generator::generate_code(const brw_shader &s,
          abort();
       }
 
-      assert(roundtrip_params.raw_bytes_size == after_size);
-
       const uint8_t *original = (const uint8_t *)enc_params.raw_bytes;
       const uint8_t *reencoded = (const uint8_t *)roundtrip_params.raw_bytes;
+
+      if (roundtrip_params.raw_bytes_size != after_size) {
+         fprintf(stderr, "ERROR: roundtrip size mismatch: 1st=%d 2nd=%d\n",
+                 after_size, roundtrip_params.raw_bytes_size);
+
+         const int min_size = MIN2(after_size, roundtrip_params.raw_bytes_size);
+         int i;
+         for (i = 0; i < min_size; i++) {
+            if (original[i] != reencoded[i]) {
+               fprintf(stderr,
+                       "ERROR: roundtrip first mismatch byte offset: %d\n",
+                       i);
+               break;
+            }
+         }
+         if (i >= min_size)
+            fprintf(stderr, "ERROR: no difference found in first %d bytes\n", i);
+
+         const void *original_inst = original;
+         const void *reencoded_inst = reencoded;
+         for (i = 0; i < dec_params.num_insts; i++) {
+            if ((const uint8_t *)original_inst >= original + after_size ||
+                (const uint8_t *)reencoded_inst >=
+                reencoded + roundtrip_params.raw_bytes_size) {
+               diff_insts(&compiler->isa,
+                          (const uint8_t *)original_inst < original + after_size ?
+                          original_inst : NULL,
+                          (const uint8_t *)reencoded_inst <
+                          reencoded + roundtrip_params.raw_bytes_size ?
+                          reencoded_inst : NULL,
+                          i);
+               break;
+            }
+
+            if (diff_insts(&compiler->isa, original_inst, reencoded_inst, i)) {
+               fprintf(stderr, "\nERROR AT OFFSET: 0x%x (of 0x%x)\n",
+                       i * 16, dec_params.num_insts * 16);
+               break;
+            }
+
+            const int original_size = gen_as_raw_compact_inst(devinfo, original_inst) ?
+               sizeof(gen_raw_compact_inst) : sizeof(gen_raw_inst);
+            const int reencoded_size = gen_as_raw_compact_inst(devinfo, reencoded_inst) ?
+               sizeof(gen_raw_compact_inst) : sizeof(gen_raw_inst);
+            original_inst = (const uint8_t *)original_inst + original_size;
+            reencoded_inst = (const uint8_t *)reencoded_inst + reencoded_size;
+         }
+      }
+      assert(roundtrip_params.raw_bytes_size == after_size);
 
       if (memcmp(original, reencoded, after_size) != 0) {
          fprintf(stderr,
