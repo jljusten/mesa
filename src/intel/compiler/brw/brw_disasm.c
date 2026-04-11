@@ -2212,6 +2212,7 @@ brw_disassemble_inst(FILE *file, const struct brw_isa_info *isa,
       .devinfo = isa->devinfo,
       .raw_bytes = raw,
       .raw_bytes_size = raw_size,
+      .program_subset = true,
       .mem_ctx = mem_ctx,
    };
 

@@ -479,6 +479,7 @@ brw_gen_disasm_info_init(const struct brw_isa_info *isa,
       .devinfo = devinfo,
       .raw_bytes = normalized,
       .raw_bytes_size = normalized_size,
+      .program_subset = true,
       .mem_ctx = mem_ctx,
    };
 
