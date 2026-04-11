@@ -977,18 +977,14 @@ struct gen_decoder {
       const uint64_t *raw_end = raw + (params->raw_bytes_size / 8);
 
       while (raw < raw_end) {
-         const unsigned inst_words = gen_raw_is_compact((void *)raw) ? 1 : 2;
-         if (raw + inst_words > raw_end)
-            break;
-
-         if (inst_words == 1) {
-            /* TODO: Decode compact form. For now use NOP as a placeholder. */
-            params->insts[decoded]->opcode = GEN_OP_NOP;
+         if (gen_raw_is_compact((void *)raw)) {
+            UNREACHABLE("Compact instructions can't be decoded!");
+            return false;
          } else {
             decode(params->insts[decoded], (gen_raw_inst *)raw);
          }
 
-         raw += inst_words;
+         raw += 2;
          decoded++;
          error_index++;
       }

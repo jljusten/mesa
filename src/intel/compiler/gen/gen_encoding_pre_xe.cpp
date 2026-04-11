@@ -810,6 +810,33 @@ struct gen_decoder_pre_xe : public gen_encoding_pre_xe {
       num_errors++;
    }
 
+   bool
+   decode_many(gen_decode_params *params)
+   {
+      int decoded = 0;
+
+      const uint64_t *raw = (uint64_t *)params->raw_bytes;
+      const uint64_t *raw_end = raw + (params->raw_bytes_size / 8);
+
+      decoded = 0;
+      while (raw < raw_end) {
+         if (gen_raw_is_compact((void *)raw)) {
+            UNREACHABLE("Compact instructions can't be decoded!");
+            return false;
+         } else {
+            /* TODO: Error handling. */
+            decode(params->insts[decoded], (gen_raw_inst *)raw);
+            decoded++;
+            raw += 2;
+         }
+      }
+
+      params->num_insts = decoded;
+      params->errors = errors;
+      params->num_errors = num_errors;
+      return params->errors == NULL;
+   }
+
    void
    decode(gen_inst *inst, const gen_raw_inst *raw)
    {
@@ -1412,32 +1439,6 @@ gen_decode_pre_xe(gen_decode_params *params)
    assert(params->insts);
    assert(params->num_insts > 0);
 
-   int decoded = 0;
-
-   uint64_t *raw = (uint64_t *)params->raw_bytes;
-   const uint64_t *raw_end = raw + (params->raw_bytes_size / 8);
-
    auto d = gen_decoder_pre_xe(params->devinfo, params->mem_ctx);
-
-   while (raw < raw_end) {
-      const unsigned inst_words = gen_raw_is_compact((void *)raw) ? 1 : 2;
-      if (raw + inst_words > raw_end)
-         break;
-
-      if (inst_words == 1) {
-         /* TODO(COMPACT): Decode compact form. For now use NOP as a placeholder. */
-         params->insts[decoded]->opcode = GEN_OP_NOP;
-      } else {
-         d.decode(params->insts[decoded], (gen_raw_inst *)raw);
-      }
-
-      raw += inst_words;
-      decoded++;
-      d.error_index++;
-   }
-
-   params->num_insts = decoded;
-   params->errors = d.errors;
-   params->num_errors = d.num_errors;
-   return d.num_errors == 0;
+   return d.decode_many(params);
 }
