@@ -1042,10 +1042,20 @@ jay_emit_mem_access(struct nir_to_jay_state *nj, nir_intrinsic_instr *intr)
          b->shader->spills++;
       }
    } else if (surf_type == LSC_ADDR_SURFTYPE_FLAT) {
-      desc |= ((uint64_t) lsc_flat_ex_desc(devinfo, base_offs_bits) << 32);
+      const gen_lsc_ex_desc gen_ex_desc = {
+         .addr_type = surf_type,
+         .flat.base_offset = base_offs_bits,
+      };
+      desc |= ((uint64_t) gen_lsc_ex_desc_encode(devinfo, &gen_ex_desc) << 32);
    } else if (jay_is_null(bti_indirect)) {
-      desc |=
-         ((uint64_t) lsc_bti_ex_desc(devinfo, bti_const, base_offs_bits) << 32);
+      const gen_lsc_ex_desc gen_ex_desc = {
+         .addr_type = LSC_ADDR_SURFTYPE_BTI,
+         .bti = {
+            .index = bti_const,
+            .base_offset = base_offs_bits,
+         },
+      };
+      desc |= ((uint64_t) gen_lsc_ex_desc_encode(devinfo, &gen_ex_desc) << 32);
    } else if (!jay_is_null(bti_indirect)) {
       ex_desc = bti_indirect;
 

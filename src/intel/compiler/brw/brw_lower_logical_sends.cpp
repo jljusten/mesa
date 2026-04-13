@@ -106,7 +106,6 @@ lower_urb_read_logical_send_xe2(const brw_builder &bld, brw_urb_inst *urb)
                              false /* transpose */,
                              LSC_CACHE(devinfo, LOAD, L1UC_L3UC));
 
-
    send->mlen = brw_lsc_msg_addr_len(devinfo, LSC_ADDR_SIZE_A32, send->exec_size);
    send->ex_mlen = 0;
    send->header_size = 0;
@@ -1101,6 +1100,8 @@ setup_lsc_surface_descriptors(const brw_builder &bld, brw_send_inst *send,
 
    const unsigned base_offset_bits =
       util_bitpack_sint(base_offset, 0, max_imm_bits - 1);
+   gen_lsc_ex_desc ex_desc = {};
+   ex_desc.addr_type = surf_type;
 
    /* On Gfx20+ UGM always uses ExBSO which implies bindless. */
    send->bindless_surface =
@@ -1137,8 +1138,10 @@ setup_lsc_surface_descriptors(const brw_builder &bld, brw_send_inst *send,
    case LSC_ADDR_SURFTYPE_BTI:
       assert(surface.file != BAD_FILE);
       if (surface.file == IMM) {
+         ex_desc.bti.index = surface.ud;
+         ex_desc.bti.base_offset = base_offset_bits;
          send->src[SEND_SRC_EX_DESC] =
-            brw_imm_ud(lsc_bti_ex_desc(devinfo, surface.ud, base_offset_bits));
+            brw_imm_ud(gen_lsc_ex_desc_encode(devinfo, &ex_desc));
       } else {
          assert(base_offset == 0);
          const brw_builder ubld = bld.uniform();
@@ -1148,8 +1151,9 @@ setup_lsc_surface_descriptors(const brw_builder &bld, brw_send_inst *send,
       break;
 
    case LSC_ADDR_SURFTYPE_FLAT:
+      ex_desc.flat.base_offset = base_offset_bits;
       send->src[SEND_SRC_EX_DESC] =
-         brw_imm_ud(lsc_flat_ex_desc(devinfo, base_offset_bits));
+         brw_imm_ud(gen_lsc_ex_desc_encode(devinfo, &ex_desc));
       break;
 
    default:
@@ -2187,10 +2191,8 @@ lower_lsc_memory_fence_and_interlock(const brw_builder &bld, struct brw_send_ins
       send->desc = brw_urb_fence_desc(devinfo);
       send->header_size = 1;
    } else {
-      enum lsc_fence_scope scope =
-         lsc_fence_msg_desc_scope(devinfo, intrinsic_desc);
-      enum lsc_flush_type flush_type =
-         lsc_fence_msg_desc_flush_type(devinfo, intrinsic_desc);
+      gen_lsc_desc desc = gen_lsc_desc_decode(devinfo, intrinsic_desc);
+      assert(desc.op == LSC_OP_FENCE);
 
       /* Wa_14012437816:
        *
@@ -2204,12 +2206,13 @@ lower_lsc_memory_fence_and_interlock(const brw_builder &bld, struct brw_send_ins
        * as NONE but avoids the downgrade to scope LOCAL.
        */
       if (intel_needs_workaround(devinfo, 14012437816) &&
-          scope > LSC_FENCE_LOCAL &&
-          flush_type == LSC_FLUSH_TYPE_NONE) {
-         flush_type = LSC_FLUSH_TYPE_NONE_6;
+          desc.fence.scope > LSC_FENCE_LOCAL &&
+          desc.fence.flush_type == LSC_FLUSH_TYPE_NONE) {
+         desc.fence.flush_type = LSC_FLUSH_TYPE_NONE_6;
       }
 
-      send->desc = lsc_fence_msg_desc(devinfo, scope, flush_type, false);
+      send->desc = lsc_fence_msg_desc(devinfo, desc.fence.scope,
+                                      desc.fence.flush_type, false);
    }
 }
 
