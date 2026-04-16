@@ -73,6 +73,11 @@ typedef struct gen_decode_params {
    const void *raw_bytes;
    int         raw_bytes_size;
 
+   /* Set true if the decode is only a subset of the program. If a subset is
+    * decoded, then it is not possible to adjust jip/uip references properly.
+    */
+   bool        program_subset;
+
    /* Must be non-NULL, used for allocating the arrays below. */
    void *mem_ctx;
 
