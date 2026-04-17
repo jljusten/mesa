@@ -1600,14 +1600,15 @@ brw_generator::generate_code(const brw_shader &s,
 
       assert(!compact);
 
+      const int uncompact_size = dec_params.num_insts * sizeof(gen_raw_inst);
       gen_encode_params enc_params = {
          .devinfo = devinfo,
          .compact_all = compact,
          .insts = (const gen_inst **)dec_params.insts,
          .num_insts = dec_params.num_insts,
          .mem_ctx = tmp_ctx,
-         .raw_bytes = ralloc_size(tmp_ctx, after_size > 0 ? after_size : 1),
-         .raw_bytes_size = after_size > 0 ? after_size : 1,
+         .raw_bytes = ralloc_size(tmp_ctx, uncompact_size),
+         .raw_bytes_size = uncompact_size,
       };
 
       if (!gen_encode(&enc_params)) {
