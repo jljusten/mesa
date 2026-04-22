@@ -1962,14 +1962,14 @@ private:
          return try_compact_3src();
 
       case GEN_FORMAT_SEND:
-         return false;
+         break;
 
       case GEN_FORMAT_BRANCH_ONE_SRC:
       case GEN_FORMAT_BRANCH_TWO_SRC:
-         return false;
+         break;
 
       case GEN_FORMAT_ILLEGAL:
-         return false;
+         break;
 
       case GEN_FORMAT_NOP:
          if (last_inst) {
