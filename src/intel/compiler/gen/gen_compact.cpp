@@ -2648,31 +2648,12 @@ private:
       this->is_dpas = desc->format == GEN_FORMAT_DPAS_THREE_SRC;
 
       switch (desc->format) {
-      case GEN_FORMAT_BASIC_ONE_SRC:
-         break;
-
-      case GEN_FORMAT_BASIC_TWO_SRC:
-         break;
-
       case GEN_FORMAT_BASIC_THREE_SRC:
       case GEN_FORMAT_DPAS_THREE_SRC:
          uncompact_3src_instruction();
          return;
 
-      case GEN_FORMAT_SEND:
-         UNREACHABLE("SEND instructions cannot be compact!");
-         return;
-
-      case GEN_FORMAT_BRANCH_ONE_SRC:
-      case GEN_FORMAT_BRANCH_TWO_SRC:
-         UNREACHABLE("BRANCH instructions cannot be compact!");
-         return;
-
-      case GEN_FORMAT_ILLEGAL:
-         UNREACHABLE("SEND instructions cannot be compact!");
-         return;
-
-      case GEN_FORMAT_NOP:
+      default:
          break;
       }
 
