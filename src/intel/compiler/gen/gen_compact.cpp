@@ -2116,6 +2116,8 @@ struct gen_uncompacter : public gen_compact_accessor<E> {
       const uint32_t num_insts = inst_num;
       assert(num_insts == (unsigned)params->num_insts);
       assert((c_to_uc_offset.size() * 8) == (size_t)params->raw_bytes_size);
+      /* Add a jump translation for the end of the program. */
+      c_to_uc_offset.push_back(uncompact_offset);
 
       uncompacted =
          ralloc_array(params->mem_ctx, gen_raw_inst, params->num_insts);
