@@ -1158,8 +1158,9 @@ struct gen_compacter : public gen_compact_accessor<E> {
          return;
 
       std::vector<uint32_t> new_offsets(params->num_insts + 1);
-      std::vector<int32_t> shifts_by_compact(original_size /
-                                             sizeof(gen_raw_compact_inst));
+      const size_t shift_slots =
+         (original_size / sizeof(gen_raw_compact_inst)) + 1;
+      std::vector<int32_t> shifts_by_compact(shift_slots);
 
       void *new_binary =
          ralloc_array(params->mem_ctx, gen_raw_inst, params->num_insts);
@@ -1193,6 +1194,8 @@ struct gen_compacter : public gen_compact_accessor<E> {
          src_offset += sizeof(gen_raw_inst);
          new_offsets[i + 1] = dst_offset;
       }
+      /* Add a shift slot for the end of the program. */
+      shifts_by_compact[shift_slots - 1] = dst_offset - src_offset;
 
       /* Update jip/uip for instructions */
       for (int i = 0; i < params->num_insts; i++) {
