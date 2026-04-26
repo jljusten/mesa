@@ -1647,6 +1647,18 @@ brw_generator::get_assembly()
    return brw_get_program(p, &prog_data->program_size);
 }
 
+const void *
+brw_generator::get_raw_assembly() const
+{
+   return p->store;
+}
+
+int
+brw_generator::next_insn_offset() const
+{
+   return p->next_insn_offset;
+}
+
 } /* namespace old */
 
 /* After program generation, go back and update the UIP and JIP of

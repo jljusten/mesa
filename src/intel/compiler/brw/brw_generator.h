@@ -25,6 +25,8 @@ public:
    void add_const_data(void *data, unsigned size);
    void add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt);
    const unsigned *get_assembly();
+   const void *get_raw_assembly() const;
+   int next_insn_offset() const;
 
 private:
    void generate_send(brw_send_inst *inst,

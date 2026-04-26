@@ -7,12 +7,15 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <inttypes.h>
 #include <optional>
 #include <vector>
 
 #include "brw_eu.h"
+#include "brw_disasm.h"
 #include "brw_disasm_info.h"
 #include "brw_shader.h"
+#include "brw_generator.h"
 #include "brw_cfg.h"
 #include "dev/intel_debug.h"
 #include "util/ralloc.h"
@@ -91,6 +94,9 @@ private:
    mesa_shader_stage stage;
    void *mem_ctx;
 
+   struct brw_stage_prog_data *old_prog_data;
+   old::brw_generator old_generator;
+
    int output_size = 0;
    uint8_t *output = NULL;
 
@@ -153,6 +159,96 @@ private:
 };
 
 } /* anonymous namespace */
+
+static brw_stage_prog_data *
+clone_prog_data(void *mem_ctx, brw_stage_prog_data *pd)
+{
+   return (brw_stage_prog_data *)ralloc_memdup(mem_ctx, pd,
+                                               brw_prog_data_size(pd->stage));
+}
+
+static void
+print_raw(FILE *fp, const void *raw)
+{
+   fprintf(fp, "(msb)  ");
+   for (int i = 127; i >= 0; i--) {
+      if (i && (i + 1) % 16 == 0)
+         fprintf(fp, "'");
+      fprintf(fp, "%" PRIu64, brw_eu_inst_bits((const brw_eu_inst *)raw, i, i));
+   }
+   fprintf(fp, "  (lsb)\n");
+}
+
+static bool
+diff_insts(const struct brw_isa_info *isa,
+           const void *gen_raw,
+           const void *old_raw,
+           int position)
+{
+   if (memcmp(gen_raw, old_raw, sizeof(gen_raw_inst)) == 0)
+      return false;
+
+   char buffer[8192];
+   FILE *fp = fmemopen(buffer, sizeof(buffer), "w");
+
+   fprintf(fp, "\n==== MISMATCH AT POSITION %d ====\n", position);
+
+   fprintf(fp, "GEN: ");
+   brw_disassemble_inst(fp, isa, (const brw_eu_inst *)gen_raw, false, 0, NULL);
+   fprintf(fp, "\n");
+
+   fprintf(fp, "OLD: ");
+   brw_disassemble_inst(fp, isa, (const brw_eu_inst *)old_raw, false, 0, NULL);
+   fprintf(fp, "\n");
+
+   fprintf(fp, "\n------------------------------\n\n");
+
+   fprintf(fp, "              "
+           "/127   \\/   112\\ /111   \\/103 96\\ /95  88\\/87  80\\ "
+           "/79  72\\/71  64\\ /63  56\\/55  48\\ /47  40\\/39  32\\ "
+           "/31  24\\/23  16\\ /15   8\\/7    0\\"
+           "\n");
+   fprintf(fp, "GEN BITS: ");
+   print_raw(fp, gen_raw);
+
+   fprintf(fp, "OLD BITS: ");
+   print_raw(fp, old_raw);
+
+   fprintf(fp, "MARKERS:  ");
+   fprintf(fp, "       ");
+   for (int i = 127; i >= 0; i--) {
+      if (i && (i + 1) % 16 == 0)
+         fprintf(fp, " ");
+      if (brw_eu_inst_bits((const brw_eu_inst *)gen_raw, i, i) !=
+          brw_eu_inst_bits((const brw_eu_inst *)old_raw, i, i))
+         fprintf(fp, "^");
+      else
+         fprintf(fp, " ");
+   }
+   fprintf(fp, "\n");
+
+   fprintf(fp, "\n------------------------------\n\n");
+
+   fprintf(fp, "MISMATCH BITS:");
+   unsigned count = 0;
+   for (int i = 127; i >= 0; i--) {
+      if (brw_eu_inst_bits((const brw_eu_inst *)gen_raw, i, i) !=
+          brw_eu_inst_bits((const brw_eu_inst *)old_raw, i, i)) {
+         fprintf(fp, " %d", i);
+         count++;
+      }
+   }
+   fprintf(fp, " (count: %u)\n", count);
+
+   fprintf(fp, "\n==== MISMATCH END ====\n\n");
+
+   fclose(fp);
+
+   fputs(buffer, stderr);
+   fflush(stderr);
+
+   return true;
+}
 
 static gen_opcode
 brw_opcode_to_gen(enum opcode op)
@@ -375,6 +471,8 @@ brw_generator::brw_generator(const struct brw_compiler *compiler,
      prog_data(prog_data), dispatch_width(0),
      debug_flag(false),
      shader_name(NULL), stage(stage), mem_ctx(params->mem_ctx),
+     old_prog_data(clone_prog_data(mem_ctx, prog_data)),
+     old_generator(compiler, params, old_prog_data, stage),
      next_annotation(NULL)
 {
 }
@@ -1263,6 +1361,8 @@ brw_generator::enable_debug(const char *shader_name)
 {
    debug_flag = true;
    this->shader_name = shader_name;
+
+   old_generator.enable_debug(shader_name);
 }
 
 int
@@ -2321,6 +2421,175 @@ brw_generator::generate_code(const brw_shader &s,
          stats->workgroup_memory_size = 0;
    }
 
+   /* Decode/encode roundtrip check.  Take the assembly generated here and run
+    * it through gen_decode/gen_encode, then compare the final result.
+    */
+   {
+      void *tmp_ctx = ralloc_context(NULL);
+
+      gen_decode_params dec_params = {
+         .devinfo = devinfo,
+         .raw_bytes = enc_params.raw_bytes,
+         .raw_bytes_size = after_size,
+         .mem_ctx = tmp_ctx,
+      };
+
+      if (!gen_decode(&dec_params)) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "COULD NOT DECODE IN ROUNDTRIP TEST\n"
+                 "\n");
+         for (int i = 0; i < dec_params.num_errors; i++)
+            fprintf(stderr, "ERROR: %d %s\n", dec_params.errors[i].index, dec_params.errors[i].msg);
+         abort();
+      }
+
+      const int uncompact_size = dec_params.num_insts * sizeof(gen_raw_inst);
+      gen_encode_params roundtrip_params = {
+         .devinfo = devinfo,
+         .compact_all = enc_params.compact_all,
+         .insts = dec_params.insts,
+         .num_insts = dec_params.num_insts,
+         .mem_ctx = tmp_ctx,
+         .raw_bytes = ralloc_size(tmp_ctx, uncompact_size),
+         .raw_bytes_size = uncompact_size,
+      };
+
+      if (!gen_encode(&roundtrip_params)) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "COULD NOT ENCODE IN ROUNDTRIP TEST\n"
+                 "\n");
+         for (int i = 0; i < roundtrip_params.num_errors; i++)
+            fprintf(stderr, "ERROR: %d %s\n", roundtrip_params.errors[i].index, roundtrip_params.errors[i].msg);
+         abort();
+      }
+
+      assert(roundtrip_params.raw_bytes_size == after_size);
+
+      const uint8_t *original = (const uint8_t *)enc_params.raw_bytes;
+      const uint8_t *reencoded = (const uint8_t *)roundtrip_params.raw_bytes;
+
+      if (memcmp(original, reencoded, after_size) != 0) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "DECODE / ENCODE ROUNDTRIP MISMATCH\n"
+                 "\n");
+
+         if (roundtrip_params.compact_all) {
+            const void *original_inst = original;
+            const void *reencoded_inst = reencoded;
+            for (int i = 0; i < dec_params.num_insts; i++) {
+               if (diff_insts(&compiler->isa, original_inst, reencoded_inst, i)) {
+                  fprintf(stderr, "\nERROR AT OFFSET: 0x%x (of 0x%x)\n",
+                          i * 16, dec_params.num_insts * 16);
+                  abort();
+               }
+
+               const int original_size = gen_as_raw_compact_inst(devinfo, original_inst) ?
+                  sizeof(gen_raw_compact_inst) : sizeof(gen_raw_inst);
+               const int reencoded_size = gen_as_raw_compact_inst(devinfo, reencoded_inst) ?
+                  sizeof(gen_raw_compact_inst) : sizeof(gen_raw_inst);
+               original_inst = (const uint8_t *)original_inst + original_size;
+               reencoded_inst = (const uint8_t *)reencoded_inst + reencoded_size;
+            }
+         } else {
+            for (int offset = 0; offset < after_size; offset += sizeof(gen_raw_inst)) {
+               if (diff_insts(&compiler->isa, original + offset,
+                              reencoded + offset,
+                              offset / sizeof(gen_raw_inst))) {
+                  fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", offset);
+                  abort();
+               }
+            }
+         }
+
+         abort();
+      }
+
+      ralloc_free(tmp_ctx);
+   }
+
+   /* Old generator check.  Run the old generator in parallel and verify that
+    * it emitted the same bytes for this shader.
+    */
+   {
+      const int old_start_offset = old_generator.generate_code(s, NULL);
+      assert(start_offset == old_start_offset);
+
+      const int old_size = old_generator.next_insn_offset() - old_start_offset;
+      bool size_mismatch = after_size != old_size;
+      if (size_mismatch) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "GENERATED CODE SIZE MISMATCH\n"
+                 "\n"
+                 "   gen=%d     old=%d\n"
+                 "\n",
+                 after_size, old_size);
+      }
+
+      const int limit = MIN2(after_size, old_size);
+
+      const uint8_t *gen_code = (const uint8_t *)output + start_offset;
+      const uint8_t *old_code = (const uint8_t *)old_generator.get_raw_assembly() + old_start_offset;
+
+      bool data_mismatch = memcmp(gen_code, old_code, limit) != 0;
+      if (data_mismatch) {
+         fprintf(stderr,
+                 "\n\n\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "##################################################\n"
+                 "\n"
+                 "INSTRUCTION MISMATCH\n"
+                 "\n");
+
+         if (enc_params.compact_all) {
+            for (int i = 0; i < limit; i++) {
+               if (gen_code[i] != old_code[i]) {
+                  fprintf(stderr, "\nERROR AT BYTE OFFSET: 0x%x\n", i);
+                  break;
+               }
+            }
+         } else {
+            for (int offset = 0; offset < limit; offset += sizeof(gen_raw_inst)) {
+               if (diff_insts(&compiler->isa, gen_code + offset,
+                              old_code + offset,
+                              offset / sizeof(gen_raw_inst))) {
+                  fprintf(stderr, "\nERROR AT OFFSET: 0x%x\n", offset);
+                  if (size_mismatch)
+                     break;
+               }
+            }
+         }
+      }
+
+      if (size_mismatch || data_mismatch)
+         abort();
+   }
+
    gen_insts.clear();
 #ifndef NDEBUG
    annotations.clear();
@@ -2338,6 +2607,8 @@ brw_generator::add_const_data(void *data, unsigned size)
       prog_data->const_data_size = size;
       prog_data->const_data_offset = append_output(data, size, 32);
    }
+
+   old_generator.add_const_data(data, size);
 }
 
 void
@@ -2359,6 +2630,8 @@ brw_generator::add_resume_sbt(unsigned num_resume_shaders, uint64_t *sbt)
          });
       }
    }
+
+   old_generator.add_resume_sbt(num_resume_shaders, sbt);
 }
 
 const unsigned *
@@ -2375,7 +2648,39 @@ brw_generator::get_assembly()
 
    prog_data->program_size = output_size;
 
-   return (unsigned *)output;
+   const unsigned *result = (unsigned *)output;
+   const unsigned *old_result = old_generator.get_assembly();
+
+   if (prog_data->program_size != old_prog_data->program_size) {
+      fprintf(stderr,
+              "\n\n\n"
+              "##################################################\n"
+              "##################################################\n"
+              "##################################################\n"
+              "##################################################\n"
+              "\n"
+              "FINAL PROGRAM SIZE MISMATCH\n"
+              "\n"
+              "   gen=%u     old=%u\n"
+              "\n",
+              prog_data->program_size, old_prog_data->program_size);
+      abort();
+   }
+
+   if (memcmp(result, old_result, prog_data->program_size) != 0) {
+      fprintf(stderr,
+              "\n\n\n"
+              "##################################################\n"
+              "##################################################\n"
+              "##################################################\n"
+              "##################################################\n"
+              "\n"
+              "FINAL PROGRAM MISMATCH\n"
+              "\n");
+      abort();
+   }
+
+   return result;
 }
 
 gen_inst
