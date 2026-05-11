@@ -56,13 +56,15 @@ brw_emit_single_fb_write(brw_shader &s, const brw_builder &bld,
 }
 
 static void
-brw_do_emit_fb_writes(brw_shader &s, int nr_color_regions, bool replicate_alpha)
+brw_do_emit_fb_writes(brw_shader &s, bool replicate_alpha)
 {
    struct brw_fs_prog_data *prog_data = brw_fs_prog_data(s.prog_data);
    const brw_builder bld = brw_builder(&s);
+   brw_fs_prog_key *key = (brw_fs_prog_key*) s.key;
+   uint8_t color_outputs_written = 0;
 
    brw_fb_write_inst *write = NULL;
-   for (int target = 0; target < nr_color_regions; target++) {
+   for (int target = 0; target < key->nr_color_regions; target++) {
       /* Skip over outputs that weren't written, unless dual source
        * blending is at play. The results may be undefined depending
        * on the blending settings, but that's what the user signed
@@ -78,10 +80,12 @@ brw_do_emit_fb_writes(brw_shader &s, int nr_color_regions, bool replicate_alpha)
       if (replicate_alpha && target != 0)
          src0_alpha = offset(s.outputs[0], bld, 3);
 
+      color_outputs_written |= 1 << target;
       write = brw_emit_single_fb_write(s, abld, s.outputs[target],
                                        s.dual_src_output, src0_alpha,
                                        target, 4, false);
    }
+   assert(key->color_outputs_valid == color_outputs_written);
 
    if (write) {
       write->last_rt = true;
@@ -132,7 +136,7 @@ brw_emit_fb_writes(brw_shader &s)
       (key->nr_color_regions > 1 && key->alpha_to_coverage &&
        s.sample_mask.file == BAD_FILE);
 
-   brw_do_emit_fb_writes(s, key->nr_color_regions, replicate_alpha);
+   brw_do_emit_fb_writes(s, replicate_alpha);
 }
 
 
