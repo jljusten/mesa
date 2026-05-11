@@ -558,6 +558,7 @@ iris_to_brw_fs_key(const struct iris_screen *screen,
       .alpha_to_coverage = key->alpha_to_coverage ? INTEL_ALWAYS : INTEL_NEVER,
       .persample_interp = key->persample_interp ? INTEL_ALWAYS : INTEL_NEVER,
       .multisample_fbo = key->multisample_fbo ? INTEL_ALWAYS : INTEL_NEVER,
+      .color_outputs_valid = key->color_outputs_valid,
       .ignore_sample_mask_out = !key->multisample_fbo,
    };
 }
