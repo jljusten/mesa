@@ -887,9 +887,11 @@ struct compact_tables {
    struct compact_table_info subreg_3src;
 };
 
+static constexpr struct compact_tables empty_tables = { { NULL, 0, 0 }, };
+
 #define declare_tables(NAME, INIT)                                      \
    static constexpr struct compact_tables NAME = []() {                 \
-      struct compact_tables tables = { 0, };                            \
+      struct compact_tables tables = empty_tables;                      \
       INIT                                                              \
       return tables;                                                    \
    }()
@@ -909,7 +911,6 @@ declare_tables(gen9_tables, {
 
    set_table(control_3src, gfx8_3src_control_index_table);
    set_table(source_3src, gfx8_3src_source_index_table);
-   return tables;
 });
 
 declare_tables(gen11_tables, {
@@ -951,8 +952,6 @@ declare_tables(xe2_tables, {
 
 #undef declare_tables
 #undef set_table
-
-static constexpr struct compact_tables empty_tables = { 0, };
 
 static const struct compact_tables&
 get_compact_tables(const struct intel_device_info *devinfo)
