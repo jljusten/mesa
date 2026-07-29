@@ -154,11 +154,30 @@ jay_occupancy(jay_shader *s, jay_inst *I)
 gen_pipe
 jay_inst_exec_pipe(const struct intel_device_info *devinfo, jay_inst *I)
 {
-   return jay_inst_is_unordered(devinfo, I) ? GEN_PIPE_NONE :
-          I->op == JAY_OPCODE_MATH          ? GEN_PIPE_MATH :
-          I->type == JAY_TYPE_F64           ? GEN_PIPE_LONG :
-          jay_type_is_any_float(I->type)    ? GEN_PIPE_FLOAT :
-                                              GEN_PIPE_INT;
+   if (jay_inst_is_unordered(devinfo, I))
+      return GEN_PIPE_NONE;
+
+   if (I->op == JAY_OPCODE_MATH)
+      return GEN_PIPE_MATH;
+
+   /* On Xe3P, type-converting MOVs (CVT) with a float/bfloat destination
+    * (size <= 32 bits) and a different source type execute on the Int pipe.
+    * See BSpec #56701.
+    */
+   if (devinfo->verx10 >= 350 &&
+       I->op == JAY_OPCODE_CVT &&
+       jay_type_is_any_float(I->type) &&
+       jay_type_size_bits(I->type) <= 32 &&
+       jay_cvt_src_type(I) != I->type)
+      return GEN_PIPE_INT;
+
+   if (I->type == JAY_TYPE_F64)
+      return GEN_PIPE_LONG;
+
+   if (jay_type_is_any_float(I->type))
+      return GEN_PIPE_FLOAT;
+
+   return GEN_PIPE_INT;
 }
 
 /**
