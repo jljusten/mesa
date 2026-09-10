@@ -39,6 +39,12 @@ sizeof_pointer = cc.sizeof('void*').to_string()
 
 null_dep = dependency('', required : false)
 
+#
+# These options should not be built into a shipping production system
+# and a warning message will be printed during meson configure.
+#
+unsupported_options = {}
+
 if get_option('layout') != 'mirror'
   error('`mirror` is the only build directory layout supported')
 endif
@@ -2684,3 +2690,10 @@ summary(perfetto_summary, section: 'Perfetto', bool_yn: true, list_sep: ' ')
 
 teflon_summary = {'Enabled': with_teflon}
 summary(teflon_summary, section: 'Teflon (TensorFlow Lite delegate)', bool_yn: true, list_sep: ' ')
+
+if unsupported_options.keys().length() > 0
+  summary(
+    unsupported_options,
+    section: 'Unsupported Options. Only use for debug and testing!'
+  )
+endif
