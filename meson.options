@@ -922,3 +922,10 @@ option(
   value : false,
   description : 'Allow usage of unsupported build options. This should not be set for production builds of Mesa.',
 )
+
+option(
+  'intel-force-probe',
+  type : 'string',
+  value : '',
+  description : 'Default value for INTEL_FORCE_PROBE env-var. WARNING: Never set this in production Mesa builds!',
+)
