@@ -915,3 +915,10 @@ option(
   value : false,
   description : 'Build panfrost Rust components.'
 )
+
+option(
+  'allow-unsupported-options',
+  type : 'boolean',
+  value : false,
+  description : 'Allow usage of unsupported build options. This should not be set for production builds of Mesa.',
+)

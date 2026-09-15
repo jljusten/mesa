@@ -2696,4 +2696,9 @@ if unsupported_options.keys().length() > 0
     unsupported_options,
     section: 'Unsupported Options. Only use for debug and testing!'
   )
+  if not get_option('allow-unsupported-options')
+     message('Upsupported options: @0@'.format(unsupported_options.keys()))
+     info()
+     error('Unsupported options were used, but allow-unsupported-options was not set.')
+  endif
 endif
