@@ -1960,6 +1960,56 @@ clear_color_attachment(struct anv_cmd_buffer *cmd_buffer,
                     "Fast color clear rejected: missing image view");
    } else if (can_fast_clear_color_att(cmd_buffer, batch, att,
                                        attachment, rectCount, pRects)) {
+      /* From the Vulkan 1.0 spec:
+       *
+       *    "Unlike other clear commands, vkCmdClearAttachments is not a
+       *     transfer command. It performs its operations in rasterization
+       *     order."
+       *
+       * SKL PRMs, Volume 7: 3D-Media-GPGPU, Render Target Fast Clear:
+       *
+       *    "After Render target fast clear, pipe-control with color cache
+       *     write-flush must be issued before sending any DRAW commands on
+       *     that render target."
+       *
+       * BSpec 57335 (Xe2+) :
+       *
+       *    "Due to interaction of scaled clearing rectangle with pixel
+       *     scoreboard, we require one of the following commands to be
+       *     issues"
+       *
+       *   then goes on to describe PIPE_CONTROL/RESOURCE_BARRIER requirements
+       *
+       *    "This synchronization step is required beforeand after a sequence
+       *     of one or more fast clear passes, to ensure correct ordering
+       *     between pixels."
+       *
+       * From the PRMs and the BSpec, it's clear the fast clear are not
+       * ordered with the regards to the pixel scoreboard. Hence why they need
+       * synchronizations before regular draws.
+       *
+       * genX(cmd_buffer_update_color_aux_op) already ensures switch to/from
+       * fast clears will insert the proper synchronization. We're just
+       * missing this vkCmdClearAttachments() which do not require any barrier
+       * inserting synchronization if you do a sequence like this :
+       *   - vkCmdBeginRendering()
+       *   - vkCmdClearAttachments()
+       *
+       * We currently limit this to efficient 64bit which is the only
+       * configuration in which we know of issues with 2 back to back fast
+       * clears.
+       */
+      if (cmd_buffer->device->physical->uses_efficient_64bit &&
+          (gfx->color_att_fast_clears & BITFIELD_BIT(att_idx))) {
+         anv_add_pending_pipe_bits(cmd_buffer,
+                                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                   cmd_buffer->device->physical->rt_change_needs_flush ?
+                                   ANV_PIPE_RT_BTI_CHANGE :
+                                   ANV_PIPE_RENDER_TARGET_CACHE_FLUSH_BIT,
+                                   "attachment fast clear after BeginRendering with fast clear");
+      }
+
       if (iview->image->vk.samples == 1) {
          exec_ccs_op(cmd_buffer, batch, iview->image,
                      iview->planes[0].isl.format,
@@ -1986,6 +2036,9 @@ clear_color_attachment(struct anv_cmd_buffer *cmd_buffer,
          anv_cmd_buffer_load_clear_color(cmd_buffer, att->surface_state.state,
                                          iview);
       }
+
+      gfx->color_att_fast_clears |= BITFIELD_BIT(att_idx);
+
       return;
    } else {
       anv_perf_warn(VK_LOG_OBJS(&cmd_buffer->device->vk.base),

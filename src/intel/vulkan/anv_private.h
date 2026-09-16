@@ -4615,6 +4615,11 @@ struct anv_cmd_graphics_state {
    struct anv_attachment stencil_att;
    struct anv_state null_surface_state;
 
+   /* Bitfield of attachments with a fast clear that would need additional
+    * flushing if we were to fast clear them again.
+    */
+   uint8_t color_att_fast_clears;
+
    /* Map of color output from the last dispatched fragment shader to color
     * attachments in the render pass.
     */

@@ -3687,6 +3687,7 @@ void
 genX(cmd_buffer_update_color_aux_op)(struct anv_cmd_buffer *cmd_buffer,
                                      enum anv_color_aux_op_class next_aux_op)
 {
+   struct anv_cmd_graphics_state *gfx = &cmd_buffer->state.gfx;
    const enum anv_color_aux_op_class last_aux_op = cmd_buffer->state.color_aux_op;
 
    if (!is_hw_managed_fast_clear(last_aux_op) &&
@@ -3920,6 +3921,10 @@ genX(cmd_buffer_update_color_aux_op)(struct anv_cmd_buffer *cmd_buffer,
    } else {
       cmd_buffer->state.color_aux_op = next_aux_op;
    }
+
+   if (last_aux_op == ANV_COLOR_AUX_OP_CLASS_FAST_CLEAR &&
+       next_aux_op != ANV_COLOR_AUX_OP_CLASS_FAST_CLEAR)
+      gfx->color_att_fast_clears = 0;
 }
 
 static void
@@ -6842,12 +6847,15 @@ void genX(CmdBeginRendering)(
                        .size = fb_size);
 
    /* Do fast clearing */
+   gfx->color_att_fast_clears = 0;
    for (uint32_t i = 0; i < gfx->color_att_count; i++) {
       struct anv_attachment *att = &gfx->color_att[i];
       struct anv_attachment_clear *att_clear = &color_att_clears[i];
 
       if (!att_clear->fast_clear)
          continue;
+
+      gfx->color_att_fast_clears |= BITFIELD_BIT(i);
 
       if (att->iview->image->vk.samples == 1) {
          anv_image_ccs_op(cmd_buffer, att->iview->image,
