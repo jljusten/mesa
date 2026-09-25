@@ -73,6 +73,14 @@ chirp(struct validate_state *validate, const char *fmt, ...)
             #cond);                                                            \
    }
 
+#define CHECK_EQ(value1, value2)                                               \
+   if ((value1) != (value2)) {                                                 \
+      chirp(validate,                                                          \
+            "equality assertion failed at %s:%u\n   %s (%d) != %s (%d)",       \
+            __FILE__, __LINE__,                                                \
+            #value1, (value1), #value2, (value2));                             \
+   }
+
 static void
 validate_flagness(struct validate_state *validate,
                   jay_def def,
@@ -317,7 +325,7 @@ validate_inst(struct validate_state *validate, jay_inst *I)
              I->op != JAY_OPCODE_SHUFFLE &&
              I->op != JAY_OPCODE_MOV_INDIRECT &&
              I->op != JAY_OPCODE_BROADCAST_IMM) {
-            CHECK(expected == words);
+            CHECK_EQ(expected, words);
          }
 
          validate_flagness(validate, I->src[s], jay_src_type(I, s), "source");
