@@ -308,8 +308,8 @@ intel_use_jay_for_stage(const struct intel_device_info *devinfo,
    if (stage == MESA_SHADER_KERNEL)
       stage = MESA_SHADER_COMPUTE;
 
-   /* Jay is fully supported on Xe2 and Xe3 */
-   bool by_default = devinfo->ver == 20 || devinfo->ver == 30;
+   /* Jay is fully supported on Xe2 and newer */
+   bool by_default = devinfo->ver >= 20;
 
    /* Other platforms do not yet work with Jay. Do not probe except for Jay
     * developers who want a broken compiler.
