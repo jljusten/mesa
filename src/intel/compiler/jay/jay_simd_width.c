@@ -167,6 +167,7 @@ pass(jay_function *func)
       b.cursor = jay_after_inst(I);
 
       if (I->op == JAY_OPCODE_MUL_32) {
+         assert(func->shader->devinfo->ver < 35);
          jay_def acc = jay_bare_reg(ACCUM, 32, 0);
 
          jay_inst *mac =

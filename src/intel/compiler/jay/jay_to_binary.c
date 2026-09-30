@@ -589,6 +589,7 @@ emit(struct jay_codegen *jc,
 
    case JAY_OPCODE_MACL:
    case JAY_OPCODE_MACH:
+      assert(jc->devinfo->ver < 35);
       gen->acc_wr_control = jc->devinfo->ver < 20;
       break;
 
