@@ -225,7 +225,8 @@ could_be_mac(const jay_shader *s, const jay_inst *I)
     *
     * Older platforms seem to actually need that restriction.
     */
-   return (I->op == JAY_OPCODE_MAD && I->type == JAY_TYPE_F32) &&
+   return s->devinfo->ver < 35 &&
+          (I->op == JAY_OPCODE_MAD && I->type == JAY_TYPE_F32) &&
           !jay_simd_split(s, I) &&
           !(I->src[0].negate || I->src[0].abs) &&
           !(jay_debug & JAY_DBG_STRICT) &&
