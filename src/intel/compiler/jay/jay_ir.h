@@ -1117,7 +1117,9 @@ jay_simd_width_logical(const jay_shader *s, const jay_inst *I)
 
    /* Handle vectors-of-UGPR operations with special care for bitsizes */
    unsigned vec_per_channel = jay_type_vector_length(I->type);
-   unsigned dst_size = I->op == JAY_OPCODE_MUL_32_PART ?
+   bool dst_size_from_src = I->op == JAY_OPCODE_MUL_32_PART ||
+      I->op == JAY_OPCODE_MULLH;
+   unsigned dst_size = dst_size_from_src ?
                           jay_num_values(I->src[0]) :
                           jay_num_values(I->dst);
    assert(util_is_aligned(dst_size, vec_per_channel));
