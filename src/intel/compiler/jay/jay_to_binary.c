@@ -337,6 +337,7 @@ static const struct {
    OP(MUL_32_PART, MUL, 2),
    OP(MUL_32X16, MUL, 2),
    OP(MUL, MUL, 2),
+   OP(MULLH, MULLH, 2),
    OP(NOT, NOT, 1),
    OP(NOP, NOP, 0),
    OP(OFFSET_PACKED_PIXEL_COORDS, ADD, 2),
