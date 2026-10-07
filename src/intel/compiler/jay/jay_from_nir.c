@@ -504,7 +504,16 @@ jay_emit_alu(struct nir_to_jay_state *nj, nir_alu_instr *alu)
 
    case nir_op_imul:
       if (jay_type_size_bits(type) == 32) {
-         jay_MUL_32(b, type, dst, src[0], src[1], false);
+         if (nj->devinfo->ver < 35) {
+            jay_MUL_32(b, type, dst, src[0], src[1], false);
+         } else {
+            unsigned half_mullh_dst =
+               dst.file == UGPR ? jay_ugpr_per_gpr(b->shader) : 1;
+            jay_def low_high = jay_alloc_def(b, dst.file, 32, 2 * half_mullh_dst);
+            jay_MULLH(b, type, low_high, src[0], src[1]);
+            jay_def low = jay_extract_range(low_high, 0, 1);
+            jay_MOV(b, dst, low);
+         }
       } else {
          jay_MUL(b, type, dst, src[0], src[1]);
       }
@@ -513,7 +522,16 @@ jay_emit_alu(struct nir_to_jay_state *nj, nir_alu_instr *alu)
 
    case nir_op_imul_high:
    case nir_op_umul_high:
-      jay_MUL_32(b, type, dst, src[0], src[1], true);
+      if (nj->devinfo->ver < 35) {
+         jay_MUL_32(b, type, dst, src[0], src[1], true);
+      } else {
+         unsigned half_mullh_dst =
+            dst.file == UGPR ? jay_ugpr_per_gpr(b->shader) : 1;
+         jay_def low_high = jay_alloc_def(b, dst.file, 32, 2 * half_mullh_dst);
+         jay_MULLH(b, type, low_high, src[0], src[1]);
+         jay_def high = jay_extract_range(low_high, half_mullh_dst, 1);
+         jay_MOV(b, dst, high);
+      }
       break;
 
    case nir_op_bfm:
