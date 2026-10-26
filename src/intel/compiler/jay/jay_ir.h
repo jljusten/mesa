@@ -999,53 +999,6 @@ jay_clobbers_address_reg(const jay_inst *I)
 }
 
 /*
- * Return the required alignment for the register assigned to a given source.
- */
-static inline unsigned
-jay_src_alignment(jay_shader *shader, const jay_inst *I, unsigned s)
-{
-   if (jay_is_flag(I->src[s])) {
-      return 1;
-   }
-
-   /* SENDs operate on entire GRFs at a time, so align UGPRs to GRFs. */
-   if (I->op == JAY_OPCODE_SEND && I->src[s].file == UGPR) {
-      return jay_ugpr_per_grf(shader);
-   }
-
-   /* Float and 64-bit source regions must preserve the LSB channel bit location
-    * unless using scalar broadcast.
-    */
-   if ((jay_type_is_any_float(I->type) ||
-        jay_type_size_bits(jay_src_type(I, s)) == 64) &&
-       I->src[s].file == UGPR &&
-       jay_num_values(I->src[s]) > jay_type_vector_length(jay_src_type(I, s))) {
-      return jay_ugpr_per_grf(shader);
-   }
-
-   /* Undocumented HW restriction: All operands to an operation involving
-    * bfloats must be GRF-aligned.
-    */
-   if (jay_src_type(I, s) == JAY_TYPE_BF16 || I->type == JAY_TYPE_BF16) {
-      return jay_ugpr_per_grf(shader);
-   }
-
-   /* If the destination is 64-bit, we need the sources to be aligned. Along
-    * with a suitable partitioning, this ensures only the aligned low half of
-    * a strided register is used, preventing invalid assembly like:
-    *
-    *    mov.s64 g40, g42.1<2>:s32
-    *
-    * ..which would violate the rule:
-    *
-    *    Register Regioning patterns where register data bit location of the LSB
-    *    of the channels are changed between source and destination are not
-    *    supported except for broadcast of a scalar.
-    */
-   return jay_type_vector_length(I->type);
-}
-
-/*
  * Return the required alignment for the register assigned to a destination.
  */
 static inline unsigned
@@ -1100,6 +1053,53 @@ jay_dst_alignment(jay_shader *shader, const jay_inst *I)
 
    /* If any source is 64-bit, align the destination to 64-bit too. As above. */
    return jay_type_vector_length(jay_src_type(I, 0));
+}
+
+/*
+ * Return the required alignment for the register assigned to a given source.
+ */
+static inline unsigned
+jay_src_alignment(jay_shader *shader, const jay_inst *I, unsigned s)
+{
+   if (jay_is_flag(I->src[s])) {
+      return 1;
+   }
+
+   /* SENDs operate on entire GRFs at a time, so align UGPRs to GRFs. */
+   if (I->op == JAY_OPCODE_SEND && I->src[s].file == UGPR) {
+      return jay_ugpr_per_grf(shader);
+   }
+
+   /* Float and 64-bit source regions must preserve the LSB channel bit location
+    * unless using scalar broadcast.
+    */
+   if ((jay_type_is_any_float(I->type) ||
+        jay_type_size_bits(jay_src_type(I, s)) == 64) &&
+       I->src[s].file == UGPR &&
+       jay_num_values(I->src[s]) > jay_type_vector_length(jay_src_type(I, s))) {
+      return jay_ugpr_per_grf(shader);
+   }
+
+   /* Undocumented HW restriction: All operands to an operation involving
+    * bfloats must be GRF-aligned.
+    */
+   if (jay_src_type(I, s) == JAY_TYPE_BF16 || I->type == JAY_TYPE_BF16) {
+      return jay_ugpr_per_grf(shader);
+   }
+
+   /* If the destination is 64-bit, we need the sources to be aligned. Along
+    * with a suitable partitioning, this ensures only the aligned low half of
+    * a strided register is used, preventing invalid assembly like:
+    *
+    *    mov.s64 g40, g42.1<2>:s32
+    *
+    * ..which would violate the rule:
+    *
+    *    Register Regioning patterns where register data bit location of the LSB
+    *    of the channels are changed between source and destination are not
+    *    supported except for broadcast of a scalar.
+    */
+   return jay_type_vector_length(I->type);
 }
 
 unsigned jay_simd_split(const jay_shader *s, const jay_inst *I);
