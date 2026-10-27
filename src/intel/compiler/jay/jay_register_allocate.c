@@ -995,9 +995,11 @@ assign_regs_for_inst(jay_ra_state *ra, jay_inst *I)
                alignment = MAX2(alignment, jay_src_alignment(shader, I, s));
                if (file == GPR) {
                   min_stride =
-                     MAX2(jay_src_stride_minmax(I, s, false), min_stride);
+                     MAX2(jay_src_stride_minmax(shader, I, s, false),
+                          min_stride);
                   max_stride =
-                     MIN2(jay_src_stride_minmax(I, s, true), max_stride);
+                     MIN2(jay_src_stride_minmax(shader, I, s, true),
+                          max_stride);
                }
             }
          }
@@ -1022,8 +1024,8 @@ assign_regs_for_inst(jay_ra_state *ra, jay_inst *I)
       } else if (!jay_is_flag(var)) {
          alignment = MAX2(alignment, jay_dst_alignment(shader, I));
          if (file == GPR) {
-            min_stride = jay_dst_stride_minmax(I, false);
-            max_stride = jay_dst_stride_minmax(I, true);
+            min_stride = jay_dst_stride_minmax(shader, I, false);
+            max_stride = jay_dst_stride_minmax(shader, I, true);
          }
       }
 
@@ -1446,7 +1448,7 @@ jay_register_allocate_function(jay_function *f)
 
          enum jay_stride old_stride = ra.affinities[index].stride;
          enum jay_stride new_stride =
-            I->src[s].file == GPR ? jay_src_stride_minmax(I, s, false)
+            I->src[s].file == GPR ? jay_src_stride_minmax(shader, I, s, false)
                                   : JAY_NUM_STRIDES;
 
          if (old_stride == JAY_NUM_STRIDES || old_stride == new_stride) {

@@ -62,18 +62,24 @@ analyze_per_inst(jay_shader *shader, unsigned base_split)
                 * changes, we'll need to complicate the partition a bit.
                 */
                if (i >= 0) {
-                  assert(jay_src_stride_minmax(I, i, false) == JAY_STRIDE_4);
-                  assert(jay_src_stride_minmax(I, i, true) == JAY_STRIDE_4);
+                  assert(jay_src_stride_minmax(shader, I, i, false) ==
+                         JAY_STRIDE_4);
+                  assert(jay_src_stride_minmax(shader, I, i, true) ==
+                         JAY_STRIDE_4);
                } else {
-                  assert(jay_dst_stride_minmax(I, false) == JAY_STRIDE_4);
-                  assert(jay_dst_stride_minmax(I, true) == JAY_STRIDE_4);
+                  assert(jay_dst_stride_minmax(shader, I, false) ==
+                         JAY_STRIDE_4);
+                  assert(jay_dst_stride_minmax(shader, I, true) ==
+                         JAY_STRIDE_4);
                }
                local.gpr_split += size;
             } else if (x.file == GPR && i >= 0) {
-               enum jay_stride min_stride = jay_src_stride_minmax(I, i, false);
+               enum jay_stride min_stride =
+                  jay_src_stride_minmax(shader, I, i, false);
                local.gpr[min_stride] += size;
             } else if (x.file == GPR) {
-               enum jay_stride min_stride = jay_dst_stride_minmax(I, false);
+               enum jay_stride min_stride =
+                  jay_dst_stride_minmax(shader, I, false);
                local.gpr[min_stride] += size;
             }
          }
@@ -474,7 +480,8 @@ jay_partition_grf(jay_shader *shader)
    unsigned counts[3] = { [JAY_STRIDE_4] = 1 };
    jay_foreach_inst_in_shader(shader, block, I) {
       if (I->dst.file == GPR) {
-         counts[jay_dst_stride_minmax(I, false)] += jay_num_values(I->dst);
+         counts[jay_dst_stride_minmax(shader, I, false)] +=
+            jay_num_values(I->dst);
       }
    }
 

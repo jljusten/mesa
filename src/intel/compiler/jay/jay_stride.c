@@ -60,7 +60,7 @@ restrict_mixed_strides(jay_inst *I, unsigned s)
 }
 
 enum jay_stride
-jay_dst_stride_minmax(jay_inst *I, bool do_max)
+jay_dst_stride_minmax(jay_shader *shader, jay_inst *I, bool do_max)
 {
    assert(I->dst.file == GPR || jay_is_null(I->dst));
 
@@ -114,7 +114,8 @@ jay_dst_stride_minmax(jay_inst *I, bool do_max)
 }
 
 enum jay_stride
-jay_src_stride_minmax(jay_inst *I, unsigned s, bool do_max)
+jay_src_stride_minmax(jay_shader *shader, jay_inst *I, unsigned s,
+                      bool do_max)
 {
    assert(I->src[s].file == GPR);
 
@@ -155,7 +156,7 @@ jay_src_stride_minmax(jay_inst *I, unsigned s, bool do_max)
    }
 
    if (restrict_mixed_strides(I, s) && I->dst.file == GPR)
-      return jay_dst_stride_minmax(I, do_max);
+      return jay_dst_stride_minmax(shader, I, do_max);
 
    return (do_max && !restrict_mixed_strides(I, s)) ? max : min;
 }
