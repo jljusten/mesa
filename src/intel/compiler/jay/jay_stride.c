@@ -27,7 +27,7 @@ max_stride_for_type(enum jay_type T)
 }
 
 static bool
-restrict_mixed_strides(jay_inst *I, unsigned s)
+restrict_mixed_strides(jay_shader *shader, jay_inst *I, unsigned s)
 {
    /* From the hardware spec section "Register Region Restrictions":
     *
@@ -56,6 +56,7 @@ restrict_mixed_strides(jay_inst *I, unsigned s)
           (I->op == JAY_OPCODE_CVT &&
            jay_cvt_src_type(I) == JAY_TYPE_F16 &&
            !jay_type_is_any_float(I->type)) ||
+          (shader->devinfo->ver >= 35 && jay_num_isa_srcs(I) >= 2) ||
           s == 2;
 }
 
@@ -110,7 +111,7 @@ jay_dst_stride_minmax(jay_shader *shader, jay_inst *I, bool do_max)
       return min;
    }
 
-   return (do_max && !restrict_mixed_strides(I, 0)) ? max : min;
+   return (do_max && !restrict_mixed_strides(shader, I, 0)) ? max : min;
 }
 
 enum jay_stride
@@ -155,8 +156,8 @@ jay_src_stride_minmax(jay_shader *shader, jay_inst *I, unsigned s,
       max = JAY_STRIDE_4;
    }
 
-   if (restrict_mixed_strides(I, s) && I->dst.file == GPR)
+   if (restrict_mixed_strides(shader, I, s) && I->dst.file == GPR)
       return jay_dst_stride_minmax(shader, I, do_max);
 
-   return (do_max && !restrict_mixed_strides(I, s)) ? max : min;
+   return (do_max && !restrict_mixed_strides(shader, I, s)) ? max : min;
 }
