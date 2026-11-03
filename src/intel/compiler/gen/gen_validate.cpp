@@ -2300,6 +2300,19 @@ private:
 
       ERROR_IF(dst_stride != src1_stride,
                "On Xe3P+, src1 and dst byte stride must match.");
+
+      unsigned dst_size = gen_type_size_bytes(inst->dst.type);
+      if (dst_size > 0) {
+         assert((inst->dst.subnr % dst_size) == 0);
+         /* src1 data byte range must fall within the byte range of dst.
+          *
+          * So, for example if dst is r1.1:d, then src1 could be, for example,
+          * r2.1:d, r2.2<2>:w or r2.3<2>:w. These are not allowed: r2:d,
+          * r2.2:d, r2.1<2>:w or r2.4<2>:w.
+          */
+         ERROR_IF((inst->dst.subnr / dst_size) != (inst->src[1].subnr / dst_size),
+                  "On Xe3P+, src1 must access data in dst channel data range.");
+      }
    }
 };
 

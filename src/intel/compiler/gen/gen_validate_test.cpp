@@ -331,7 +331,8 @@ static const struct {
    { "add (8) r0.1<2>:w r1:d r2:d",
      "Destination subregister must align to the execution type size.",
    },
-   { "add (4) r0.4<2>:w r1:d r2:d", VALID },
+   { "add (4) r0.4<2>:w r1:d r2:d",   VALID, { .lt = 350 } },
+   { "add (4) r0.4<2>:w r1:d r2.2:d", VALID },
 
 
    { "add (8) r0:d r1<8;16,1>:d r2:d", "ExecSize must be greater than or equal to Width." },
@@ -494,7 +495,8 @@ static const struct {
 
 
    { "(f0.0) sel (8) r0<2>:b r1:w r2:w", VALID },
-   { "(f0.0) sel (8) r0.1<2>:b r1:w r2:w", VALID },
+   { "(f0.0) sel (8) r0.1<2>:b r1:w r2:w",   VALID, { .lt = 350 } },
+   { "(f0.0) sel (8) r0.2<2>:b r1:w r2.1:w", VALID },
 
 
    { "mov (8) r0<2>:b 0x00:q",
@@ -2080,32 +2082,40 @@ static const struct {
    { "add (8) r0:d r[a0.0 + 2]<VxH;1,0>:d r4:d", VALID, { .ge = 200 } },
 
    /* Source 0. Uniform stride W->W cases. */
-   { "add (8) r0.1:w r2:w r4:w", VALID, { .ge = 200 } },
-   { "add (8) r0.1:w r2.2:w r4:w", VALID, { .ge = 200 } },
+   { "add (8) r0.1:w r2:w r4:w", VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.1:w r2:w r4.1:w", VALID, { .ge = 200 } },
+   { "add (8) r0.1:w r2.2:w r4:w", VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.1:w r2.2:w r4.1:w", VALID, { .ge = 200 } },
    { "add (8) r0.1:w r2<2>:w r4:w",
      "Invalid register region for source 0. See special restrictions section.", { .ge = 200 }
    },
-   { "add (8) r0.1:w r2.2<2>:w r4:w", VALID, { .ge = 200 } },
+   { "add (8) r0.1:w r2.2<2>:w r4:w", VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.1:w r2.2<2>:w r4.1:w", VALID, { .ge = 200 } },
    { "add (8) r0.1:w r2<4>:w r4:w",
      "Invalid register region for source 0. See special restrictions section.", { .ge = 200 }
    },
    { "add (8) r0.1:w r2.2<4>:w r4:w", SAME_ERROR, { .ge = 200 } },
 
    /* Source 0. Dword aligned W->W cases. */
-   { "add (8) r0.2:w r2<8;4,1>:w r4:w",   VALID, { .ge = 200 } },
-   { "add (8) r0.2:w r2.4<8;4,1>:w r4:w", VALID, { .ge = 200 } },
+   { "add (8) r0.2:w r2<8;4,1>:w r4:w", VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.2:w r2<8;4,1>:w r4.2:w", VALID, { .ge = 200 } },
+   { "add (8) r0.2:w r2.4<8;4,1>:w r4:w", VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.2:w r2.4<8;4,1>:w r4.2:w", VALID, { .ge = 200 } },
    { "add (8) r0.2:w r2<2>:w r4:w",
      "Invalid register region for source 0. See special restrictions section.", { .ge = 200 }
    },
-   { "add (8) r0.2:w r2.4<2>:w r4:w", VALID, { .ge = 200 } },
+   { "add (8) r0.2:w r2.4<2>:w r4:w", VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.2:w r2.4<2>:w r4.2:w", VALID, { .ge = 200 } },
    { "add (8) r0.2:w r2<16;2,4>:w r4:w",
      "Invalid register region for source 0. See special restrictions section.", { .ge = 200 }
    },
    { "add (8) r0.2:w r2.4<16;2,4>:w r4:w", SAME_ERROR, { .ge = 200 } },
 
    /* Source 0. Uniform stride W->B cases. */
-   { "add (8) r0.2<2>:b r2:w r4:w",      VALID, { .ge = 200 } },
-   { "add (8) r0.2<2>:b r2.1:w r4:w",    VALID, { .ge = 200 } },
+   { "add (8) r0.2<2>:b r2:w r4:w",      VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.2<2>:b r2:w r4.1:w",    VALID, { .ge = 200 } },
+   { "add (8) r0.2<2>:b r2.1:w r4:w",    VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.2<2>:b r2.1:w r4.1:w",  VALID, { .ge = 200 } },
    { "add (8) r0.2<2>:b r2<2>:w r4:w",
      "Invalid register region for source 0. See special restrictions section.", { .ge = 200 }
    },
@@ -2114,8 +2124,10 @@ static const struct {
    { "add (8) r0.2<2>:b r2.1<4>:w r4:w", SAME_ERROR, { .ge = 200 } },
 
    /* Source 0. Dword aligned W->B cases. */
-   { "add (8) r0.4<2>:b r2<8;4,1>:w r4:w",   VALID, { .ge = 200 } },
-   { "add (8) r0.4<2>:b r2.2<8;4,1>:w r4:w", VALID, { .ge = 200 } },
+   { "add (8) r0.4<2>:b r2<8;4,1>:w r4:w",     VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.4<2>:b r2<8;4,1>:w r4.2:w",   VALID, { .ge = 200 } },
+   { "add (8) r0.4<2>:b r2.2<8;4,1>:w r4:w",   VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.4<2>:b r2.2<8;4,1>:w r4.2:w", VALID, { .ge = 200 } },
    { "add (8) r0.4<2>:b r2<2>:w r4:w",
      "Invalid register region for source 0. See special restrictions section.", { .ge = 200 }
    },
@@ -2142,7 +2154,8 @@ static const struct {
    { "add (8) r0<2>:w r2:d r4:w", VALID, { .ge = 200, .lt = 350 } },
 
    /* Source 1. Uniform stride W->W cases. */
-   { "add (8) r0.1:w r2:w r4.2:w",    VALID, { .ge = 200 } },
+   { "add (8) r0.1:w r2:w r4.2:w",    VALID, { .ge = 200, .lt = 350 } },
+   { "add (8) r0.1:w r2:w r4.1:w",    VALID, { .ge = 200 } },
    { "add (8) r0.1:w r2:w r4<2>:w",
      "Invalid register region for source 1. See special restrictions section.", { .ge = 200 }
    },
@@ -2165,7 +2178,7 @@ static const struct {
    { "add (8) r0.2:w r2:w r4.4<16;2,4>:w", SAME_ERROR, { .ge = 200 } },
 
    /* Source 1. Uniform stride W->B cases. */
-   { "add (8) r0.2<2>:b r2:b r4:w",      VALID, { .ge = 200 } },
+   { "add (8) r0.2<2>:b r2:b r4:w",      VALID, { .ge = 200, .lt = 350 } },
    { "add (8) r0.2<2>:b r2:b r4.1:w",    VALID, { .ge = 200 } },
    { "add (8) r0.2<2>:b r2:b r4<2>:w",
      "Invalid register region for source 1. See special restrictions section.", { .ge = 200 }
@@ -2212,6 +2225,8 @@ static const struct {
    { "add (8) r0.2:w r2:w r4.4<2>:w",     SAME_ERROR, { .ge = 350 } },
    { "add (8) r0.4<2>:b r2:w r4<8;4,1>:w", SAME_ERROR, { .ge = 350 } },
    { "add (8) r0.4<2>:b r2:w r4.2<8;4,1>:w", SAME_ERROR, { .ge = 350 } },
+   { "add (8) r6.8:uw r5.16:uw r5.24:uw",
+     "On Xe3P+, src1 must access data in dst channel data range", { .ge = 350 } },
 
 };
 
