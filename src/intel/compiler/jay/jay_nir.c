@@ -141,7 +141,7 @@ lower_reduce(nir_builder *b, nir_intrinsic_instr *intr, unsigned simd_width)
                                         nir_channel(b, hi, 1));
             accum = nir_vec2(b, x, y);
          } else {
-            accum = nir_build_alu2(b, binop, lo, hi);
+            accum = nir_build_alu2(b, binop, hi, lo);
          }
       }
 
