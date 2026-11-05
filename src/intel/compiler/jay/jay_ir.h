@@ -1043,6 +1043,16 @@ jay_dst_alignment(jay_shader *shader, const jay_inst *I)
       return jay_ugpr_per_grf(shader);
    }
 
+   /* On Xe3P, align vectorized UGPR binary operations to a whole GRF.
+    * This keeps reduction operations using the same alignment for dst/src1.
+    */
+   if (shader->devinfo->ver >= 35 &&
+       I->uniform &&
+       jay_num_isa_srcs(I) == 2 &&
+       jay_num_values(I->src[1]) > 1) {
+      return jay_ugpr_per_grf(shader);
+   }
+
    bool is_any_operand_bf16 = false;
    for (size_t i = 0; i < I->num_srcs; i++) {
       if (jay_src_type(I, i) == JAY_TYPE_BF16) {
