@@ -882,6 +882,11 @@ pick_regs(jay_ra_state *ra,
       }
    }
 
+   if ((jay_debug & JAY_DBG_PRINTDEMAND) && best_cost == UINT32_MAX) {
+      fprintf(stderr, "(RA) [G:%u\tU:%u\tF:%u] ", register_demand(ra, GPR),
+              register_demand(ra, UGPR), register_demand(ra, FLAG));
+      fprintf(stderr, "FAILED pick_regs(file=%s)\n", jay_file_prefix(file));
+   }
    assert(best_cost != UINT32_MAX && "we always find something");
    assert(best_reg + size <= ra->num_regs[file]);
    return best_reg;
