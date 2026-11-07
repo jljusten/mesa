@@ -179,7 +179,8 @@ jay_dag_print(struct jay_dag *dag)
       for (unsigned j = first; j < dag->adjacency[i]; ++j) {
          struct jay_edge *it =
             util_dynarray_element(&dag->edges, struct jay_edge, j);
-         printf("%u->%u%s\n", i, it->node, it->strong ? "" : " (weak)");
+         fprintf(stderr, "%u->%u%s\n", i, it->node,
+                 it->strong ? "" : " (weak)");
       }
    }
 }

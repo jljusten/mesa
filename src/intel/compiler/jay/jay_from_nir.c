@@ -5202,7 +5202,7 @@ jay_compile_simd(const struct intel_device_info *devinfo,
 
    if (debug) {
       if (nir->info.label) {
-         printf("%s - ", nir->info.label);
+         fprintf(stderr, "%s - ", nir->info.label);
       }
 
       const char *shader_name =

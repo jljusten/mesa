@@ -250,9 +250,9 @@ print_copies(struct jay_parallel_copy *copies, unsigned nr)
    printf("[[\n");
 
    for (unsigned i = 0; i < nr; i++) {
-      printf("  %s%u = %s%u\n", jay_file_prefix(r_file(copies[i].dst)),
-             r_reg(copies[i].dst), jay_file_prefix(r_file(copies[i].src)),
-             r_reg(copies[i].src));
+      fprintf(stderr, "  %s%u = %s%u\n",
+              jay_file_prefix(r_file(copies[i].dst)), r_reg(copies[i].dst),
+              jay_file_prefix(r_file(copies[i].src)), r_reg(copies[i].src));
    }
 
    printf("]]\n");
