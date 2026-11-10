@@ -551,11 +551,15 @@ emit(struct jay_codegen *jc,
       gen->exec_size *= 2;
       gen->chan_offset = 0;
       gen->dst = gen_retype(gen->dst, GEN_TYPE_UW);
-      gen->src[0] = gen_retype(gen->src[0], GEN_TYPE_UW);
-      gen->src[1] =
-         jay_is_imm(I->src[1]) ?
-            gen_imm_uv(0x11100100) :
+      if (jay_is_imm(I->src[1])) {
+         gen->src[0] = gen_retype(gen->src[0], GEN_TYPE_UW);
+         gen->src[1] = gen_imm_uv(0x11100100);
+      } else {
+         gen_operand new_src1 = gen_retype(gen->src[0], GEN_TYPE_UW);
+         gen->src[0] =
             gen_restride(gen_retype(gen->src[1], GEN_TYPE_UW), 0, 8, 1);
+         gen->src[1] = new_src1;
+      }
       break;
 
    case JAY_OPCODE_COARSE_PIXEL_CORNERS:
