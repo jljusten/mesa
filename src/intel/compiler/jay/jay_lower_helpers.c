@@ -164,7 +164,9 @@ jay_lower_helpers(jay_shader *shader)
    /* Initialize the helper flag sensibly based on the dispatch mask (sr0.2) */
    jay_def sr0_2 = jay_scalar(J_ARF, jay_flag_bits(entry), GEN_ARF_STATE);
    sr0_2.reg = 2;
-   jay_NOT(&b, jay_flag_type(entry), ctx.helper_flag, sr0_2);
+   jay_def tmp = jay_alloc_def(&b, UGPR, 32, 1);
+   jay_MOV(&b, tmp, sr0_2);
+   jay_NOT(&b, jay_flag_type(entry), ctx.helper_flag, tmp);
 
    jay_foreach_block_rev(entry, block) {
       process_block(&ctx, &b, block);
