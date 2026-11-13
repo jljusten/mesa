@@ -154,6 +154,10 @@ jay_lower_helpers(jay_shader *shader)
    jay_function *entry = jay_shader_get_entrypoint(shader);
    jay_builder b = jay_init_builder(entry, jay_before_function(entry));
 
+   bool vmask =
+      shader->stage == MESA_SHADER_FRAGMENT &&
+      shader->prog_data->fs.uses_vmask;
+
    /* By ABI with jay_assign_flags, the last flag is used to track helpers */
    assert(shader->helpers_tracked);
    unsigned helper_flag_no =
@@ -161,11 +165,13 @@ jay_lower_helpers(jay_shader *shader)
    struct ctx ctx = { .helper_flag = jay_bare_reg(FLAG, jay_flag_bits(entry),
                                                   helper_flag_no) };
 
-   /* Initialize the helper flag sensibly based on the dispatch mask (sr0.2) */
-   jay_def sr0_2 = jay_scalar(J_ARF, jay_flag_bits(entry), GEN_ARF_STATE);
-   sr0_2.reg = 2;
+   /* Initialize the helper flag sensibly based on the dispatch mask (sr0.2)
+    * or vmask (sr0.3).
+    */
+   jay_def mask = jay_scalar(J_ARF, jay_flag_bits(entry), GEN_ARF_STATE);
+   mask.reg = vmask ? 3 : 2;
    jay_def tmp = jay_alloc_def(&b, UGPR, 32, 1);
-   jay_MOV(&b, tmp, sr0_2);
+   jay_MOV(&b, tmp, mask);
    jay_NOT(&b, jay_flag_type(entry), ctx.helper_flag, tmp);
 
    jay_foreach_block_rev(entry, block) {
